@@ -18,42 +18,42 @@ from mrpack2curseforge.config import PROJECT_ROOT, Config
 
 
 @dataclass(frozen=True)
-class Campo:
+class Field:
     """Uma configuração editável, do jeito que a interface precisa desenhar."""
 
-    chave: str
-    rotulo: str
-    ajuda: str
-    tipo: str  # "secret" | "texto" | "inteiro" | "decimal"
-    padrao: Any = ""
-    minimo: float | None = None
-    maximo: float | None = None
-    passo: float | None = None
-    grupo: str = "geral"
+    key: str
+    label: str
+    help: str
+    type: str  # "secret" | "text" | "int" | "float"
+    default: Any = ""
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+    group: str = "geral"
     link: str = ""  # página onde o valor é obtido; vira "configurar ↗" na tela
 
-    def normalizar(self, valor: Any) -> tuple[Any, str | None]:
+    def normalize(self, value: Any) -> tuple[Any, str | None]:
         """Devolve `(valor, erro)`; erro != None significa recusar a gravação."""
 
-        texto = str(valor if valor is not None else "").strip()
+        text = str(value if value is not None else "").strip()
 
-        if self.tipo in ("secret", "texto"):
-            return texto, None
+        if self.type in ("secret", "text"):
+            return text, None
 
-        if texto == "":
+        if text == "":
             return "", None
 
         try:
-            numero = int(texto) if self.tipo == "inteiro" else float(texto)
+            number = int(text) if self.type == "int" else float(text)
         except ValueError:
-            return None, f"{self.rotulo}: “{texto}” não é um número"
+            return None, f"{self.label}: “{text}” não é um número"
 
-        if self.minimo is not None and numero < self.minimo:
-            return None, f"{self.rotulo}: mínimo {self.minimo}"
-        if self.maximo is not None and numero > self.maximo:
-            return None, f"{self.rotulo}: máximo {self.maximo}"
+        if self.minimum is not None and number < self.minimum:
+            return None, f"{self.label}: mínimo {self.minimum}"
+        if self.maximum is not None and number > self.maximum:
+            return None, f"{self.label}: máximo {self.maximum}"
 
-        return numero, None
+        return number, None
 
 
 # A ordem aqui é a ordem na tela. Slider onde existe um intervalo com sentido;
@@ -63,131 +63,131 @@ class Campo:
 # "o mod existe, falta a versão" de "o mod não existe lá" (§4b), calibrado com
 # dados reais. Mexer nele muda o diagnóstico de todos os mods, e um slider
 # convida a mexer sem medir. Continua ajustável pelo `.env` à mão.
-CAMPOS: list[Campo] = [
-    Campo(
+FIELDS: list[Field] = [
+    Field(
         "CURSEFORGE_API_KEY",
         "Chave da API do CurseForge",
         "Sem ela a conversão não roda. Gere uma no console e cole aqui.",
         "secret",
-        grupo="acesso",
+        group="acesso",
         # o `#/api-keys` é a rota da página de chaves; se ela mudar de nome, o
         # domínio sozinho ainda cai no console certo
         link="https://console.curseforge.com/#/api-keys",
     ),
-    Campo(
+    Field(
         "M2CF_INPUT_DIR",
         "Pasta de entrada",
         "Onde os .mrpack são procurados. Vazio = input_modpacks/ do projeto.",
-        "texto",
-        grupo="pastas",
+        "text",
+        group="pastas",
     ),
-    Campo(
+    Field(
         "M2CF_OUTPUT_DIR",
         "Pasta de saída",
         "Onde os modpacks e registros são gravados.",
-        "texto",
-        grupo="pastas",
+        "text",
+        group="pastas",
     ),
-    Campo(
+    Field(
         "M2CF_CACHE",
         "Arquivo de cache",
         "Banco SQLite com as respostas das APIs.",
-        "texto",
-        grupo="pastas",
+        "text",
+        group="pastas",
     ),
-    Campo(
+    Field(
         "M2CF_WORKERS",
         "Mods em paralelo",
         "Mais rápido, porém mais requisições por segundo às APIs.",
-        "inteiro",
-        padrao=6,
-        minimo=1,
-        maximo=24,
-        passo=1,
-        grupo="desempenho",
+        "int",
+        default=6,
+        minimum=1,
+        maximum=24,
+        step=1,
+        group="desempenho",
     ),
-    Campo(
+    Field(
         "M2CF_MAX_CANDIDATES",
         "Candidatos inspecionados",
         "Quantos projetos parecidos têm os arquivos abertos por mod.",
-        "inteiro",
-        padrao=8,
-        minimo=1,
-        maximo=20,
-        passo=1,
-        grupo="desempenho",
+        "int",
+        default=8,
+        minimum=1,
+        maximum=20,
+        step=1,
+        group="desempenho",
     ),
-    Campo(
+    Field(
         "M2CF_SEARCH_PAGES",
         "Páginas de busca",
         "Profundidade da busca textual no CurseForge.",
-        "inteiro",
-        padrao=3,
-        minimo=1,
-        maximo=10,
-        passo=1,
-        grupo="desempenho",
+        "int",
+        default=3,
+        minimum=1,
+        maximum=10,
+        step=1,
+        group="desempenho",
     ),
-    Campo(
+    Field(
         "M2CF_FILE_PAGES",
         "Páginas de arquivos",
         "Quanto do histórico de versões é varrido nos melhores candidatos.",
-        "inteiro",
-        padrao=20,
-        minimo=1,
-        maximo=50,
-        passo=1,
-        grupo="desempenho",
+        "int",
+        default=20,
+        minimum=1,
+        maximum=50,
+        step=1,
+        group="desempenho",
     ),
-    Campo(
+    Field(
         "M2CF_RECENT_FILES",
         "Arquivos recentes comparados",
         "Quantos arquivos de cada lado entram na comparação do diagnóstico.",
-        "inteiro",
-        padrao=10,
-        minimo=1,
-        maximo=30,
-        passo=1,
-        grupo="diagnóstico",
+        "int",
+        default=10,
+        minimum=1,
+        maximum=30,
+        step=1,
+        group="diagnóstico",
     ),
-    Campo(
+    Field(
         "M2CF_DIAGNOSIS_CANDIDATES",
         "Candidatos no diagnóstico",
         "Quantos projetos do CurseForge são investigados quando nada casa.",
-        "inteiro",
-        padrao=5,
-        minimo=1,
-        maximo=15,
-        passo=1,
-        grupo="diagnóstico",
+        "int",
+        default=5,
+        minimum=1,
+        maximum=15,
+        step=1,
+        group="diagnóstico",
     ),
-    Campo(
+    Field(
         "M2CF_HTTP_TIMEOUT",
         "Tempo limite (s)",
         "Quanto esperar por cada resposta das APIs.",
-        "inteiro",
-        padrao=60,
-        minimo=5,
-        maximo=300,
-        passo=5,
-        grupo="rede",
+        "int",
+        default=60,
+        minimum=5,
+        maximum=300,
+        step=5,
+        group="rede",
     ),
-    Campo(
+    Field(
         "M2CF_HTTP_RETRIES",
         "Tentativas",
         "Quantas vezes repetir uma requisição que falhou.",
-        "inteiro",
-        padrao=4,
-        minimo=0,
-        maximo=10,
-        passo=1,
-        grupo="rede",
+        "int",
+        default=4,
+        minimum=0,
+        maximum=10,
+        step=1,
+        group="rede",
     ),
 ]
 
-POR_CHAVE = {campo.chave: campo for campo in CAMPOS}
+BY_KEY = {field.key: field for field in FIELDS}
 
-SEGREDOS = {campo.chave for campo in CAMPOS if campo.tipo == "secret"}
+SECRETS = {field.key for field in FIELDS if field.type == "secret"}
 
 
 def env_path() -> Path:
@@ -196,72 +196,72 @@ def env_path() -> Path:
     return PROJECT_ROOT / ".env"
 
 
-def _linhas(caminho: Path) -> list[str]:
-    if not caminho.is_file():
+def _lines(path: Path) -> list[str]:
+    if not path.is_file():
         return []
-    return caminho.read_text(encoding="utf-8").splitlines()
+    return path.read_text(encoding="utf-8").splitlines()
 
 
-def ler() -> dict[str, str]:
+def read() -> dict[str, str]:
     """Valores que estão no `.env`, ignorando comentários e linhas soltas."""
 
-    valores: dict[str, str] = {}
+    values: dict[str, str] = {}
 
-    for linha in _linhas(env_path()):
-        limpa = linha.strip()
-        if not limpa or limpa.startswith("#") or "=" not in limpa:
+    for line in _lines(env_path()):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
 
-        chave, _, valor = limpa.partition("=")
-        valores[chave.strip()] = valor.strip().strip('"').strip("'")
+        key, _, value = stripped.partition("=")
+        values[key.strip()] = value.strip().strip('"').strip("'")
 
-    return valores
+    return values
 
 
-def mascarar(valor: str) -> str:
+def mask(value: str) -> str:
     """`abcdef…xyz` -> `••••••xyz`. O bastante para reconhecer, não para usar."""
 
-    if not valor:
+    if not value:
         return ""
-    if len(valor) <= 4:
-        return "•" * len(valor)
+    if len(value) <= 4:
+        return "•" * len(value)
 
-    return "•" * 8 + valor[-4:]
+    return "•" * 8 + value[-4:]
 
 
-def estado() -> dict[str, Any]:
+def state() -> dict[str, Any]:
     """Tudo o que a tela de configurações precisa desenhar."""
 
-    atuais = ler()
+    current = read()
 
     return {
         "path": str(env_path()),
-        "campos": [
+        "fields": [
             {
-                "chave": campo.chave,
-                "rotulo": campo.rotulo,
-                "ajuda": campo.ajuda,
-                "tipo": campo.tipo,
-                "grupo": campo.grupo,
-                "padrao": campo.padrao,
-                "minimo": campo.minimo,
-                "maximo": campo.maximo,
-                "passo": campo.passo,
-                "link": campo.link,
+                "key": field.key,
+                "label": field.label,
+                "help": field.help,
+                "type": field.type,
+                "group": field.group,
+                "default": field.default,
+                "minimum": field.minimum,
+                "maximum": field.maximum,
+                "step": field.step,
+                "link": field.link,
                 # segredo nunca sai inteiro daqui
-                "valor": (
-                    mascarar(atuais.get(campo.chave, ""))
-                    if campo.chave in SEGREDOS
-                    else atuais.get(campo.chave, "")
+                "value": (
+                    mask(current.get(field.key, ""))
+                    if field.key in SECRETS
+                    else current.get(field.key, "")
                 ),
-                "definido": bool(atuais.get(campo.chave)),
+                "is_set": bool(current.get(field.key)),
             }
-            for campo in CAMPOS
+            for field in FIELDS
         ],
     }
 
 
-def gravar(mudancas: dict[str, Any]) -> dict[str, Any]:
+def write(changes: dict[str, Any]) -> dict[str, Any]:
     """Aplica as mudanças no `.env`, preservando o que já estava lá.
 
     Valor vazio **remove** a chave do arquivo (volta ao default do código).
@@ -269,73 +269,73 @@ def gravar(mudancas: dict[str, Any]) -> dict[str, Any]:
     editor de texto livre.
     """
 
-    limpos: dict[str, str] = {}
-    erros: list[str] = []
+    clean: dict[str, str] = {}
+    errors: list[str] = []
 
-    for chave, bruto in mudancas.items():
-        campo = POR_CHAVE.get(chave)
-        if campo is None:
+    for key, raw in changes.items():
+        field = BY_KEY.get(key)
+        if field is None:
             continue
 
-        valor, erro = campo.normalizar(bruto)
-        if erro:
-            erros.append(erro)
+        value, error = field.normalize(raw)
+        if error:
+            errors.append(error)
             continue
 
-        limpos[chave] = "" if valor == "" else str(valor)
+        clean[key] = "" if value == "" else str(value)
 
-    if erros:
-        return {"ok": False, "erros": erros}
+    if errors:
+        return {"ok": False, "errors": errors}
 
-    caminho = env_path()
-    linhas = _linhas(caminho)
-    vistas: set[str] = set()
-    saida: list[str] = []
+    path = env_path()
+    lines = _lines(path)
+    seen: set[str] = set()
+    out: list[str] = []
 
-    for linha in linhas:
-        limpa = linha.strip()
-        chave = limpa.partition("=")[0].strip().lstrip("#").strip()
+    for line in lines:
+        stripped = line.strip()
+        key = stripped.partition("=")[0].strip().lstrip("#").strip()
 
         # comentário, linha em branco ou chave que não estamos editando
-        if not limpa or "=" not in limpa or chave not in limpos:
-            saida.append(linha)
+        if not stripped or "=" not in stripped or key not in clean:
+            out.append(line)
             continue
 
-        vistas.add(chave)
-        valor = limpos[chave]
+        seen.add(key)
+        value = clean[key]
 
         # remover = comentar, para o usuário ver que a linha existiu
-        saida.append(f"{chave}={valor}" if valor else f"# {chave}=")
+        out.append(f"{key}={value}" if value else f"# {key}=")
 
-    novas = [f"{c}={v}" for c, v in limpos.items() if v and c not in vistas]
+    new = [f"{c}={v}" for c, v in clean.items() if v and c not in seen]
 
-    if novas:
-        if saida and saida[-1].strip():
-            saida.append("")
-        saida.extend(novas)
+    if new:
+        if out and out[-1].strip():
+            out.append("")
+        out.extend(new)
 
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    caminho.write_text("\n".join(saida).rstrip("\n") + "\n", encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
 
-    aplicar(limpos)
-    return {"ok": True, "path": str(caminho), "gravadas": sorted(limpos)}
+    apply(clean)
+    return {"ok": True, "path": str(path), "saved": sorted(clean)}
 
 
-def aplicar(valores: dict[str, str]) -> None:
+def apply(values: dict[str, str]) -> None:
     """Reflete as mudanças no `Config` em memória, sem reiniciar o servidor.
 
     Só os campos que o processo relê a cada uso valem na hora; pastas e cache
     são resolvidos na importação, então a interface avisa que precisa reiniciar.
     """
 
-    for chave, valor in valores.items():
-        if valor:
-            os.environ[chave] = valor
+    for key, value in values.items():
+        if value:
+            os.environ[key] = value
         else:
-            os.environ.pop(chave, None)
+            os.environ.pop(key, None)
 
-    if "CURSEFORGE_API_KEY" in valores:
-        Config.CURSEFORGE_API_KEY = valores["CURSEFORGE_API_KEY"] or None
+    if "CURSEFORGE_API_KEY" in values:
+        Config.CURSEFORGE_API_KEY = values["CURSEFORGE_API_KEY"] or None
 
     numericos = {
         "M2CF_WORKERS": ("WORKERS", int, 6),
@@ -349,36 +349,36 @@ def aplicar(valores: dict[str, str]) -> None:
         "M2CF_HTTP_RETRIES": ("HTTP_RETRIES", int, 4),
     }
 
-    for chave, (atributo, tipo, padrao) in numericos.items():
-        if chave not in valores:
+    for key, (atributo, type, default) in numericos.items():
+        if key not in values:
             continue
 
-        bruto = valores[chave]
+        raw = values[key]
 
         try:
-            setattr(Config, atributo, tipo(bruto) if bruto else padrao)
+            setattr(Config, atributo, type(raw) if raw else default)
         except ValueError:
-            setattr(Config, atributo, padrao)
+            setattr(Config, atributo, default)
 
 
 # --------------------------------------------------------------------------- #
 # Restaurar
 # --------------------------------------------------------------------------- #
-PRECISA_REINICIAR = {"M2CF_INPUT_DIR", "M2CF_OUTPUT_DIR", "M2CF_CACHE"}
+NEEDS_RESTART = {"M2CF_INPUT_DIR", "M2CF_OUTPUT_DIR", "M2CF_CACHE"}
 
 
-def restaurar_padrao() -> dict[str, Any]:
+def reset_defaults() -> dict[str, Any]:
     """Apaga do `.env` tudo o que a tela edita, **menos** os segredos.
 
     Perder a chave da API por clicar em "restaurar padrão" seria uma surpresa
     cara: apagá-la é outro botão (`apagar_segredos`).
     """
 
-    alvos = [campo.chave for campo in CAMPOS if campo.chave not in SEGREDOS]
-    return gravar({chave: "" for chave in alvos})
+    targets = [field.key for field in FIELDS if field.key not in SECRETS]
+    return write({key: "" for key in targets})
 
 
-def apagar_segredos() -> dict[str, Any]:
+def forget_secrets() -> dict[str, Any]:
     """Apaga só a chave da API — o resto das configurações fica como está."""
 
-    return gravar({chave: "" for chave in SEGREDOS})
+    return write({key: "" for key in SECRETS})

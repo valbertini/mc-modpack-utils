@@ -38,7 +38,17 @@ src/mrpack2curseforge/
 ├── progress.py               Reporter: ConsoleReporter (rich) | JobReporter (web)
 ├── records.py                registros em conversions/*.json + regeneração
 ├── web/
-│   ├── server.py             FastAPI: estado, upload, jobs, conflitos, busca CF
+│   ├── server.py             monta o app: CSP, estáticos e os routers
+│   ├── context.py            AppContext: pastas, JobManager, clientes, guardas
+│   ├── schemas.py            corpos das requisições (pydantic)
+│   ├── payloads.py           formatos que a tela consome (sem FastAPI)
+│   ├── routes/               um módulo por assunto, cada um expõe router(ctx)
+│   │   ├── packs.py          estado da tela, upload, inspeção
+│   │   ├── jobs.py           iniciar, revisar, aplicar, cancelar, baixar
+│   │   ├── updates.py        packs atualizados já salvos
+│   │   ├── records.py        conversões salvas + regeração
+│   │   ├── catalog.py        Minecraft, loaders, Modrinth, CurseForge
+│   │   └── system.py         configurações, cache, encerrar
 │   ├── jobs.py               Job/JobManager: conversão em thread + resoluções
 │   └── static/               index.html + style.css + app.js (zero dependências)
 ├── config.py                 .env, paths e limites
@@ -71,10 +81,10 @@ Antes de dar por pronto, **um comando**:
 uv run python tools/check_all.py
 ```
 
-Roda o `pytest` (133 testes, nenhum toca a rede), o `tools/check_ui.js`
-(53 asserções sobre os estados da interface), o `node --check` e as linhas
-longas. É um script para não precisar de pipe nem `$(...)` no shell — os dois
-travam a sessão pedindo aprovação.
+Roda o `pytest` (153 testes, nenhum toca a rede), o `flake8` (88 colunas,
+importes e variáveis sem uso), o `tools/check_ui.js` (102 asserções sobre os
+estados da interface) e o `node --check`. É um script para não precisar de pipe
+nem `$(...)` no shell — os dois travam a sessão pedindo aprovação.
 
 ---
 

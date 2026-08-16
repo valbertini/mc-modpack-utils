@@ -110,46 +110,46 @@ class El {
 const SETTINGS_FALSO = {
   path: "C:/projeto/.env",
   locked_by: null,
-  campos: [
+  fields: [
     {
-      chave: "CURSEFORGE_API_KEY",
-      rotulo: "Chave da API",
-      ajuda: "sem ela não roda",
-      tipo: "secret",
-      grupo: "acesso",
-      padrao: "",
+      key: "CURSEFORGE_API_KEY",
+      label: "Chave da API",
+      help: "sem ela não roda",
+      type: "secret",
+      group: "acesso",
+      default: "",
       link: "https://console.curseforge.com/#/api-keys",
-      minimo: null,
-      maximo: null,
-      passo: null,
-      valor: "••••••••9999",
-      definido: true,
+      minimum: null,
+      maximum: null,
+      step: null,
+      value: "••••••••9999",
+      is_set: true,
     },
     {
-      chave: "M2CF_INPUT_DIR",
-      rotulo: "Pasta de entrada",
-      ajuda: "onde procurar",
-      tipo: "texto",
-      grupo: "pastas",
-      padrao: "",
-      minimo: null,
-      maximo: null,
-      passo: null,
-      valor: "",
-      definido: false,
+      key: "M2CF_INPUT_DIR",
+      label: "Pasta de entrada",
+      help: "onde procurar",
+      type: "text",
+      group: "pastas",
+      default: "",
+      minimum: null,
+      maximum: null,
+      step: null,
+      value: "",
+      is_set: false,
     },
     {
-      chave: "M2CF_WORKERS",
-      rotulo: "Mods em paralelo",
-      ajuda: "mais rápido, mais requisições",
-      tipo: "inteiro",
-      grupo: "desempenho",
-      padrao: 6,
-      minimo: 1,
-      maximo: 24,
-      passo: 1,
-      valor: "8",
-      definido: true,
+      key: "M2CF_WORKERS",
+      label: "Mods em paralelo",
+      help: "mais rápido, mais requisições",
+      type: "int",
+      group: "desempenho",
+      default: 6,
+      minimum: 1,
+      maximum: 24,
+      step: 1,
+      value: "8",
+      is_set: true,
     },
   ],
 };
@@ -915,7 +915,7 @@ conferir(
   !elementos.get("settings-fields").innerHTML.includes("setting-link")
 );
 
-app.SETTINGS.campos[0].definido = false;
+app.SETTINGS.campos[0].is_set = false;
 app.renderSettings();
 
 {
@@ -941,7 +941,7 @@ app.renderSettings();
   );
 }
 
-app.SETTINGS.campos[0].definido = true;
+app.SETTINGS.campos[0].is_set = true;
 app.renderSettings();
 
 // revelar a chave não pode fechar o painel

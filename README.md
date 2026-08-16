@@ -10,6 +10,10 @@ Duas ferramentas sobre modpacks do **Modrinth** (`.mrpack`), na mesma interface:
 As duas se completam: dá para atualizar um pack antigo e, com um clique, mandar o
 resultado para a conversão.
 
+> **Este projeto foi escrito inteiramente com IA** (Claude Code), do primeiro
+> commit a esta linha — código, testes e documentação. As decisões de produto e
+> a revisão são humanas; a digitação, não.
+
 ---
 
 ## Uso — interface web (recomendado)
@@ -382,7 +386,9 @@ src/mrpack2curseforge/
 ├── progress.py       abstração de progresso (terminal ou web)
 ├── records.py        registros persistentes + regeneração do .zip
 ├── web/              interface web local (FastAPI + HTML/CSS/JS sem build)
-│   ├── server.py     rotas da API
+│   ├── server.py     monta o app e inclui os routers
+│   ├── context.py    pastas, trabalhos e clientes compartilhados pelas rotas
+│   ├── routes/       um módulo por assunto (packs, jobs, updates, …)
 │   ├── jobs.py       conversões em background + estado dos conflitos
 │   └── static/       index.html, style.css, app.js
 ├── domain.py         modelos internos (PackFile, Modpack, MatchResult)

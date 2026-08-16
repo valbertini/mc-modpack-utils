@@ -1116,11 +1116,11 @@ Isso impõe três invariantes, todos testados:
 | invariante | por quê |
 | --- | --- |
 | comentários, ordem e chaves desconhecidas sobrevivem | o `.env` é do usuário, não nosso; ele pode ter `MINHA_VAR` lá |
-| a chave da API nunca sai inteira do servidor | `mascarar()` devolve `••••••••9999` — o bastante para reconhecer, não para usar |
+| a chave da API nunca sai inteira do servidor | `mask()` devolve `••••••••9999` — o bastante para reconhecer, não para usar |
 | valor vazio **comenta** a linha, não apaga | você vê que a configuração existiu e qual era o nome dela |
 
 **Slider ou caixa de texto** não é escolha estética: sai do próprio campo. Quem
-declara `minimo`/`maximo` vira slider **com caixa numérica ao lado** (o slider
+declara `minimum`/`maximum` vira slider **com caixa numérica ao lado** (o slider
 para procurar, a caixa para acertar); caminho e segredo viram caixa de texto.
 Assim acrescentar uma configuração nova é mexer numa lista só, em `settings.py`.
 
@@ -1174,6 +1174,76 @@ página são lidos *enquanto* a conversão roda: trocá-los no meio daria um
 resultado que não corresponde nem ao valor antigo nem ao novo. O backend recusa
 com 409 e o `GET` devolve `locked_by`, para a interface desabilitar os campos em
 vez de deixar você digitar para levar erro no fim.
+
+---
+
+## 5r. O `server.py` virou routers (v0.23)
+
+**O problema.** `create_app()` tinha **858 linhas**: 47 rotas declaradas como
+fechos dentro de uma função só, para capturar `input_path`, `output_path` e o
+`JobManager`. Funcionava, mas era a decisão mais fora do padrão do repositório —
+qualquer pessoa que já viu um projeto FastAPI espera `APIRouter` por assunto.
+
+**A divisão.** Seis módulos em `web/routes/`, um por assunto (packs, jobs,
+updates, records, catalog, system), mais três de apoio: `context.py` com o que
+todos compartilham, `schemas.py` com os corpos de requisição e `payloads.py`
+com os formatos que a tela consome — este último sem importar FastAPI, então dá
+para testá-lo sem subir servidor. O `server.py` caiu para ~140 linhas: CSP,
+middleware, estáticos e a inclusão dos routers.
+
+**Cada router é uma fábrica** (`router(ctx) -> APIRouter`), e não um
+`APIRouter` de módulo com `Depends`. O motivo é concreto: os testes criam várias
+aplicações lado a lado apontando para pastas temporárias diferentes, e um router
+global carregaria estado de uma para a outra. O contexto entra por parâmetro.
+
+**O que a divisão revelou.** Três blocos repetidos que viraram método do
+contexto: `input_pack()` (o mesmo "monta o caminho, 404 se não existe" em quatro
+rotas), `require_free()` (o 409 de "já existe um trabalho aberto") e
+`require_api_key()`. O `state = {"curseforge": None}` — um dicionário de uma
+chave só, usado como célula mutável para o fecho — virou atributo do contexto.
+
+**Como foi verificado.** Os corpos das rotas não foram redigitados: saíram do
+arquivo antigo por fatiamento de linhas, com renomeação mecânica dos nomes
+capturados. Depois, um script comparou o inventário de rotas (método + caminho)
+com a lista tirada do monólito: **44 rotas, nenhuma sumiu, nenhuma duplicou**.
+Os 153 testes e uma bateria de fumaça contra o servidor real fecham a conta.
+
+---
+
+## 5s. Nome em inglês, prosa em português (v0.23)
+
+O repositório sempre teve uma convenção implícita: **identificadores em inglês,
+comentários e textos de tela em português**. O `settings.py` era o único módulo
+que a violava por inteiro (`Campo`, `gravar`, `estado`, `mascarar`), e por
+tabela o `/api/settings` era o único endpoint com chaves JSON em português —
+`{"chave": ..., "rotulo": ...}` ao lado de um `/api/state` que devolve
+`{"name": ..., "size_mb": ...}`.
+
+Agora `Field`, `write()`, `state()`, `mask()`, e o payload em inglês
+(`key`, `label`, `help`, `type`, `value`, `default`, `minimum`, `maximum`,
+`step`, `group`, `is_set`). **Duas exceções deliberadas**: os valores de `group`
+("acesso", "pastas", "desempenho"…) continuam em português porque são o texto
+do cabeçalho que aparece na tela; e o `app.js` continua com nomes em português,
+que é a convenção dele — o que mudou foram as chaves da API que ele consome.
+
+A troca foi feita sobre os *tokens* do Python, não com busca e substituição no
+texto: trocar "valor" por "value" com regex teria estragado toda a prosa. Um
+script comparou os 165 trechos de comentário e docstring antes e depois — só
+mudaram os literais que são chave de JSON.
+
+---
+
+## 5t. O `.flake8` deixou de ser enfeite (v0.23)
+
+O arquivo `.flake8` existia desde a v0.9, mas o flake8 **não estava instalado**:
+ninguém conseguia rodá-lo, nem o editor. Em compensação, o `tools/check_all.py`
+tinha uma varredura de colunas escrita à mão, que via só o comprimento das
+linhas.
+
+Agora o flake8 é dependência de desenvolvimento e entrou na bateria; a varredura
+artesanal saiu. O ganho não é estético: na primeira execução ele achou um
+`W292` que a varredura não via, e as duas mutações de teste (`import` sem uso,
+variável sem uso) provam que ele pega o que ninguém pegava.
 
 ---
 

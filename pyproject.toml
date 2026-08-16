@@ -1,6 +1,6 @@
 [project]
 name = "mrpack2curseforge"
-version = "0.22.0"
+version = "0.23.0"
 description = "Converte modpacks .mrpack para o CurseForge e atualiza seus mods."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +20,10 @@ dependencies = [
 mrpack2curseforge = "mrpack2curseforge.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "flake8>=7.3.0",
+    "pytest>=8.0",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -3,6 +3,10 @@
 Roda tudo o que substitui CI aqui e devolve código != 0 se algo falhar.
 Existe para ser um comando só, sem pipes nem substituição de comando — que no
 Git Bash do Windows caem no prompt de aprovação e travam a sessão.
+
+O limite de 88 colunas e os importes sem uso saem do flake8 (`.flake8` na
+raiz); antes havia uma varredura de colunas escrita à mão aqui, que via só o
+comprimento das linhas.
 """
 
 import subprocess
@@ -28,31 +32,19 @@ def rodar(nome: str, comando: list[str]) -> None:
         return
 
     texto = (saida.stdout + saida.stderr).strip()
-    print("\n".join(texto.splitlines()[-6:]) if texto else "  (sem saída)")
+    linhas = texto.splitlines()
+
+    # quando passa, o resumo basta; quando falha, você quer a lista inteira
+    print("\n".join(linhas if saida.returncode else linhas[-6:]) or "  (sem saída)")
 
     if saida.returncode:
         falhas.append(nome)
 
 
 rodar("pytest", [sys.executable, "-m", "pytest", "-q"])
+rodar("flake8", [sys.executable, "-m", "flake8", "src", "tests", "tools"])
 rodar("estados da interface", ["node", str(RAIZ / "tools/check_ui.js")])
 rodar("sintaxe do app.js", ["node", "--check", str(APP_JS)])
-
-# ------------------------------------------------------------- linhas longas
-print("\n=== linhas > 88 colunas ===")
-longas = [
-    f"{caminho.relative_to(RAIZ).as_posix()}:{numero}"
-    for pasta in ("src", "tests", "tools")
-    for caminho in sorted((RAIZ / pasta).rglob("*.py"))
-    for numero, linha in enumerate(
-        caminho.read_text(encoding="utf-8").splitlines(), start=1
-    )
-    if len(linha) > 88
-]
-
-print("  " + ("\n  ".join(longas) if longas else "nenhuma"))
-if longas:
-    falhas.append("linhas longas")
 
 print()
 if falhas:

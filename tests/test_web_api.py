@@ -980,10 +980,10 @@ def test_endpoints_das_configuracoes(client, tmp_path: Path, monkeypatch):
     env.write_text("CURSEFORGE_API_KEY=chave-secreta-1234\n", encoding="utf-8")
 
     estado = client.get("/api/settings").json()
-    api = next(c for c in estado["campos"] if c["chave"] == "CURSEFORGE_API_KEY")
+    api = next(c for c in estado["fields"] if c["key"] == "CURSEFORGE_API_KEY")
 
-    assert "chave-secreta" not in api["valor"]
-    assert api["valor"].endswith("1234")
+    assert "chave-secreta" not in api["value"]
+    assert api["value"].endswith("1234")
 
     salvo = client.put("/api/settings", json={"values": {"M2CF_WORKERS": "9"}}).json()
     assert salvo["ok"] is True
@@ -1002,7 +1002,7 @@ def test_endpoints_das_configuracoes(client, tmp_path: Path, monkeypatch):
 
     depois = client.post("/api/settings/reset").json()
     assert depois["ok"] is True
-    assert settings.ler()["CURSEFORGE_API_KEY"] == "chave-secreta-1234"
+    assert settings.read()["CURSEFORGE_API_KEY"] == "chave-secreta-1234"
 
 
 def test_configuracoes_travam_com_trabalho_aberto(
@@ -1049,6 +1049,6 @@ def test_apagar_a_chave_pela_api_preserva_o_resto(
 
     assert client.post("/api/settings/forget-key").json()["ok"] is True
 
-    valores = settings.ler()
+    valores = settings.read()
     assert "CURSEFORGE_API_KEY" not in valores
     assert valores["M2CF_WORKERS"] == "11"

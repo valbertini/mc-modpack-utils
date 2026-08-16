@@ -15,12 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from mrpack2curseforge.domain import (
-    Diagnosis,
-    MatchResult,
-    MatchStrategy,
-    MissingReason,
-)
+from mrpack2curseforge.domain import Diagnosis, MatchResult, MatchStrategy
 
 RECORDS_DIRNAME = "conversions"
 RECORD_VERSION = 1

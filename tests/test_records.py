@@ -10,9 +10,7 @@ from mrpack2curseforge.domain import (
     Diagnosis,
     MatchResult,
     MatchStrategy,
-    MinecraftInfo,
     MissingReason,
-    Modpack,
     PackFile,
 )
 from mrpack2curseforge.parsers.mrpack import MrpackParser

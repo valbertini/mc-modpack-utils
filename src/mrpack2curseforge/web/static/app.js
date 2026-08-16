@@ -3899,18 +3899,18 @@ const settingsSujo = () => Object.keys(SETTINGS.rascunho).length > 0;
 
 /** O valor que o campo deve mostrar agora: o digitado, ou o do servidor. */
 function settingsValor(campo) {
-  if (Object.prototype.hasOwnProperty.call(SETTINGS.rascunho, campo.chave)) {
-    return SETTINGS.rascunho[campo.chave];
+  if (Object.prototype.hasOwnProperty.call(SETTINGS.rascunho, campo.key)) {
+    return SETTINGS.rascunho[campo.key];
   }
 
   // o segredo vem mascarado: nunca é o valor de verdade
-  return campo.tipo === "secret" ? "" : campo.valor;
+  return campo.type === "secret" ? "" : campo.value;
 }
 
 async function abrirSettings() {
   try {
     const dados = await api("/api/settings");
-    SETTINGS.campos = dados.campos;
+    SETTINGS.campos = dados.fields;
     SETTINGS.travado = dados.locked_by || null;
     setText($("settings-path"), dados.path);
   } catch (error) {
@@ -3946,8 +3946,8 @@ function renderSettings() {
   const blocos = [];
 
   SETTINGS.campos.forEach((campo) => {
-    if (campo.grupo !== grupoAtual) {
-      grupoAtual = campo.grupo;
+    if (campo.group !== grupoAtual) {
+      grupoAtual = campo.group;
       blocos.push(`<p class="setting-group">${esc(grupoAtual)}</p>`);
     }
     blocos.push(campoSettings(campo));
@@ -3979,7 +3979,7 @@ function renderSettings() {
  */
 function tituloSettings(campo, id) {
   // só o símbolo: sem texto, o `title`/`aria-label` é o que diz para onde vai
-  const link = campo.link && !campo.definido
+  const link = campo.link && !campo.is_set
     ? `<a class="tag setting-link" href="${esc(campo.link)}"
           target="_blank" rel="noreferrer noopener"
           title="Abrir a página onde este valor é obtido"
@@ -3987,29 +3987,29 @@ function tituloSettings(campo, id) {
     : "";
 
   return `<div class="setting-title">
-            <label for="${id}">${esc(campo.rotulo)}</label>${link}
+            <label for="${id}">${esc(campo.label)}</label>${link}
           </div>`;
 }
 
 function campoSettings(campo) {
   const valor = settingsValor(campo);
-  const id = `set-${campo.chave}`;
+  const id = `set-${campo.key}`;
   const titulo = tituloSettings(campo, id);
 
-  if (campo.tipo === "secret") {
-    const revelar = SETTINGS.revelando[campo.chave];
-    const temChave = campo.definido;
+  if (campo.type === "secret") {
+    const revelar = SETTINGS.revelando[campo.key];
+    const temChave = campo.is_set;
 
     return `
       <div class="setting">
         ${titulo}
-        <span class="hint">${esc(campo.ajuda)}</span>
+        <span class="hint">${esc(campo.help)}</span>
         <div class="secret-row">
-          <input class="input" id="${id}" data-set="${esc(campo.chave)}"
+          <input class="input" id="${id}" data-set="${esc(campo.key)}"
                  type="${revelar ? "text" : "password"}"
                  value="${esc(valor)}"
-                 placeholder="${temChave ? esc(campo.valor) : "nenhuma chave salva"}">
-          <button class="btn btn-sm" data-reveal="${esc(campo.chave)}"
+                 placeholder="${temChave ? esc(campo.value) : "nenhuma chave salva"}">
+          <button class="btn btn-sm" data-reveal="${esc(campo.key)}"
                   title="${revelar ? "esconder" : "mostrar o que você digitou"}">
             ${revelar ? "🙈" : "👁"}
           </button>
@@ -4025,31 +4025,31 @@ function campoSettings(campo) {
       </div>`;
   }
 
-  if (campo.tipo === "texto") {
+  if (campo.type === "text") {
     return `
       <div class="setting">
         ${titulo}
-        <span class="hint">${esc(campo.ajuda)}</span>
-        <input class="input full" id="${id}" data-set="${esc(campo.chave)}"
+        <span class="hint">${esc(campo.help)}</span>
+        <input class="input full" id="${id}" data-set="${esc(campo.key)}"
                value="${esc(valor)}" placeholder="padrão do projeto">
       </div>`;
   }
 
   // numérico: slider para procurar, caixa para acertar
-  const atual = valor === "" ? campo.padrao : valor;
+  const atual = valor === "" ? campo.default : valor;
 
   return `
     <div class="setting">
       ${titulo}
-      <span class="hint">${esc(campo.ajuda)}</span>
+      <span class="hint">${esc(campo.help)}</span>
       <div class="row">
-        <input type="range" data-set-range="${esc(campo.chave)}"
-               min="${campo.minimo}" max="${campo.maximo}" step="${campo.passo}"
+        <input type="range" data-set-range="${esc(campo.key)}"
+               min="${campo.minimum}" max="${campo.maximum}" step="${campo.step}"
                value="${esc(atual)}">
-        <input class="input" type="number" id="${id}" data-set="${esc(campo.chave)}"
-               min="${campo.minimo}" max="${campo.maximo}" step="${campo.passo}"
+        <input class="input" type="number" id="${id}" data-set="${esc(campo.key)}"
+               min="${campo.minimum}" max="${campo.maximum}" step="${campo.step}"
                value="${esc(atual)}"
-               placeholder="${esc(campo.padrao)}">
+               placeholder="${esc(campo.default)}">
       </div>
     </div>`;
 }
@@ -4127,7 +4127,7 @@ async function salvarSettings() {
       body: JSON.stringify({ values: SETTINGS.rascunho }),
     });
 
-    SETTINGS.campos = dados.state.campos;
+    SETTINGS.campos = dados.state.fields;
     SETTINGS.rascunho = {};
     renderSettings();
 
@@ -4153,7 +4153,7 @@ async function aplicarSettings(rota, chaveBotao, pergunta, sucesso) {
   try {
     const dados = await api(rota, { method: "POST" });
 
-    SETTINGS.campos = dados.state.campos;
+    SETTINGS.campos = dados.state.fields;
     SETTINGS.rascunho = {};
     renderSettings();
 
