@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mrpack2curseforge</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="header">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⛏</span>
+      <div>
+        <h1>mrpack2curseforge</h1>
+        <p class="sub">Modrinth <span class="arrow">→</span> CurseForge</p>
+      </div>
+    </div>
+
+    <nav class="tools" id="tools">
+      <button class="tool active" data-tool="converter">
+        Conversor <span class="tool-sub">.mrpack → CurseForge</span>
+      </button>
+      <button class="tool" data-tool="atualizador">
+        Atualizador <span class="tool-sub">mods para outra versão do MC</span>
+      </button>
+    </nav>
+
+    <div class="topbar-right">
+      <button class="btn btn-ghost btn-sm" id="btn-clear-cache"
+              title="Apaga as respostas guardadas do Modrinth e do CurseForge">
+        Limpar cache <span class="hint" id="cache-size"></span>
+      </button>
+      <span id="api-pill" class="pill pill-muted">verificando…</span>
+      <button class="btn btn-ghost btn-sm" id="btn-quit"
+              title="Fecha o servidor local; a aba pode ser fechada depois">
+        Encerrar
+      </button>
+
+      <div class="settings-wrap">
+        <button class="btn btn-ghost btn-sm" id="btn-settings"
+                title="Configurações (edita o .env)" aria-expanded="false">⚙</button>
+
+        <div class="settings hidden" id="settings-panel">
+          <div class="row space settings-head">
+            <div>
+              <h2>Configurações</h2>
+              <p class="hint path mono" id="settings-path"></p>
+            </div>
+            <span class="pill pill-warn hidden" id="settings-dirty">não salvo</span>
+          </div>
+
+          <div class="settings-body scroller" id="settings-fields"></div>
+
+          <div class="notice hidden" id="settings-notice"></div>
+
+          <div class="row settings-actions">
+            <button class="btn btn-primary" id="btn-settings-save" disabled>
+              Salvar
+            </button>
+            <button class="btn" id="btn-settings-discard" disabled>Descartar</button>
+            <button class="btn btn-ghost" id="btn-settings-reset">
+              Restaurar padrão
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="convert" data-tool="converter">Converter</button>
+    <button class="tab" data-tab="conflicts" data-tool="converter">
+      Conflitos <span class="badge" id="tab-conflicts-badge">0</span>
+    </button>
+    <button class="tab hidden" data-tab="update" data-tool="atualizador">Atualizar</button>
+    <button class="tab hidden" data-tab="update-review" data-tool="atualizador">
+      Revisar <span class="badge" id="tab-update-badge">0</span>
+    </button>
+  </nav>
+</div>
+
+<main>
+
+<!-- ------------------------------------------------------------ CONVERTER -->
+<section class="panel active split" id="panel-convert">
+
+  <!-- coluna 1: entradas ou conversões salvas (uma de cada vez) -->
+  <div class="col-lists">
+    <div class="card col-card">
+
+      <nav class="switch" data-switch="convert">
+        <button class="active" data-side="convert-in">Entrada</button>
+        <button data-side="convert-out">Conversões salvas</button>
+      </nav>
+
+      <!-- entrada -->
+      <div class="side active" id="side-convert-in">
+        <p class="hint">
+          Procura cada mod no CurseForge e monta um <span class="mono">.zip</span>
+          pronto para importar lá.
+        </p>
+        <p class="hint path" id="input-dir" title=""></p>
+
+        <div id="pack-list" class="pack-list scroller"></div>
+
+        <div class="dropzone" id="dropzone">
+          <p>Arraste um <code>.mrpack</code> aqui ou</p>
+          <label class="btn btn-ghost btn-sm">
+            escolha um arquivo
+            <input type="file" id="file-input" accept=".mrpack" hidden>
+          </label>
+          <div class="upload-progress hidden" id="upload-progress">
+            <div class="bar"><div class="fill" id="upload-fill"></div></div>
+            <span id="upload-text">enviando…</span>
+          </div>
+        </div>
+
+        <div class="row start-row">
+          <button class="btn btn-primary" id="btn-convert" disabled>Iniciar conversão</button>
+        </div>
+        <p class="hint" id="selected-label">nenhum modpack selecionado</p>
+      </div>
+
+      <!-- saída -->
+      <div class="side" id="side-convert-out">
+        <p class="hint">
+          Guardamos só o que foi decidido; o <span class="mono">.zip</span> é
+          gerado na hora, quando você pedir.
+        </p>
+        <p class="hint path" id="output-dir" title=""></p>
+
+        <div id="record-list" class="pack-list scroller"></div>
+
+        <div class="row start-row" id="record-actions"></div>
+        <p class="hint" id="record-selected">nenhuma conversão selecionada</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- coluna 2: a conversão -->
+  <div class="col-conversion">
+    <div class="card col-card conversion">
+      <div class="row space">
+        <h2>Conversão</h2>
+        <span class="pill pill-muted" id="job-status">nenhuma aberta</span>
+      </div>
+
+      <p class="hint" id="conversion-empty">
+        Escolha um modpack à esquerda e clique em <strong>Iniciar conversão</strong>.
+        Uma conversão por vez — o progresso e o log aparecem aqui.
+      </p>
+
+      <div class="job-body hidden" id="conversion-body">
+        <p class="job-source mono" id="job-source"></p>
+
+        <div class="progress-head">
+          <span id="stage-label">…</span>
+          <span class="mono" id="counter-label"></span>
+        </div>
+        <div class="bar"><div class="fill" id="progress-fill"></div></div>
+
+        <!-- o popup cobre o aviso e os botões, sem empurrar o log -->
+        <div class="job-head">
+          <div class="notice hidden" id="job-notice"></div>
+          <div class="row job-actions" id="job-actions"></div>
+          <div class="confirm hidden" id="apply-confirm"></div>
+        </div>
+
+        <div class="log scroller" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- coluna 3: detalhes -->
+  <aside class="col-detail">
+    <div class="card col-card detail scroller" id="detail">
+      <h2>Detalhes</h2>
+      <p class="hint">
+        Clique num modpack de entrada para ver o que tem dentro dele, ou numa
+        conversão salva para rever as decisões e gerar o modpack de novo.
+      </p>
+    </div>
+  </aside>
+
+</section>
+
+<!-- ------------------------------------------------------------ CONFLITOS -->
+<section class="panel" id="panel-conflicts">
+
+  <div class="card" id="conflicts-empty">
+    <h2>Nenhum conflito</h2>
+    <p class="hint">
+      Os mods que não forem encontrados sozinhos no CurseForge aparecem aqui para
+      você decidir o que fazer.
+    </p>
+  </div>
+
+  <div class="card hidden" id="conflicts-summary">
+    <div class="row space">
+      <div>
+        <h2>Resolver conflitos</h2>
+        <p class="hint" id="conflicts-hint"></p>
+      </div>
+      <div class="row">
+        <span class="pill" id="mc-pill"></span>
+        <button class="btn" id="btn-discard" disabled>Descartar alterações</button>
+        <button class="btn btn-primary" id="btn-save" disabled>Salvar mudanças</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="conflict-groups"></div>
+
+</section>
+
+<!-- ------------------------------------------------------------- ATUALIZAR -->
+<section class="panel split" id="panel-update">
+
+  <div class="col-lists">
+    <div class="card col-card">
+
+      <nav class="switch" data-switch="update">
+        <button class="active" data-side="update-in">Entrada</button>
+        <button data-side="update-out">Packs atualizados</button>
+      </nav>
+
+      <!-- entrada -->
+      <div class="side active" id="side-update-in">
+        <p class="hint">
+          Troca os mods pela versão mais recente do Minecraft que você escolher e
+          devolve um <span class="mono">.mrpack</span> novo.
+        </p>
+        <p class="hint path" id="update-input-dir" title=""></p>
+
+        <div id="update-pack-list" class="pack-list scroller"></div>
+
+        <div class="row fields">
+          <label>
+            <span class="section-label">Minecraft de destino</span>
+            <select class="input full" id="update-mc"></select>
+          </label>
+          <label>
+            <span class="section-label">modloader</span>
+            <select class="input full" id="update-loader-name"></select>
+          </label>
+          <label>
+            <span class="section-label loader-label">
+              versão <span class="hint" id="update-loader-hint"></span>
+            </span>
+            <select class="input full" id="update-loader"></select>
+          </label>
+        </div>
+
+        <div class="row start-row">
+          <button class="btn btn-primary" id="btn-update" disabled>Analisar atualização</button>
+        </div>
+        <p class="hint" id="update-selected">nenhum modpack selecionado</p>
+      </div>
+
+      <!-- saída -->
+      <div class="side" id="side-update-out">
+        <p class="hint">
+          O <span class="mono">.mrpack</span> fica salvo junto com o registro do
+          que foi decidido.
+        </p>
+        <p class="hint path" id="update-output-dir" title=""></p>
+
+        <div id="update-output-list" class="pack-list scroller"></div>
+
+        <div class="row start-row" id="update-output-actions"></div>
+        <p class="hint" id="update-output-selected">nenhum pack selecionado</p>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="col-conversion">
+    <div class="card col-card conversion">
+      <div class="row space">
+        <h2>Atualização</h2>
+        <span class="pill pill-muted" id="u-status">nenhuma aberta</span>
+      </div>
+
+      <p class="hint" id="u-empty">
+        Escolha o modpack e a versão do Minecraft ao lado. O progresso e o log
+        aparecem aqui.
+      </p>
+
+      <div class="job-body hidden" id="u-body">
+        <p class="job-source mono" id="u-source"></p>
+
+        <div class="progress-head">
+          <span id="u-stage">…</span>
+          <span class="mono" id="u-counter"></span>
+        </div>
+        <div class="bar"><div class="fill" id="u-fill"></div></div>
+
+        <div class="job-head">
+          <div class="notice hidden" id="u-notice"></div>
+          <div class="row job-actions" id="u-actions"></div>
+          <div class="confirm hidden" id="u-confirm"></div>
+        </div>
+
+        <div class="log scroller" id="u-log"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="col-detail">
+    <div class="card col-card detail scroller" id="u-detail">
+      <h2>Resultado</h2>
+      <p class="hint">
+        Clique num modpack de entrada para ver o que tem dentro dele, ou num pack
+        atualizado para rever as decisões.
+      </p>
+    </div>
+  </aside>
+
+</section>
+
+<!-- --------------------------------------------- ATUALIZAR · REVISAR -->
+<section class="panel" id="panel-update-review">
+
+  <div class="card" id="ur-empty">
+    <h2>Nada para revisar</h2>
+    <p class="hint">
+      Analise uma atualização para ver aqui, arquivo por arquivo, o que vai mudar —
+      e trocar a versão (ou o projeto) do que você prefere diferente.
+    </p>
+  </div>
+
+  <div class="card hidden" id="ur-summary">
+    <div class="row space">
+      <div>
+        <h2>Revisar a atualização</h2>
+        <p class="hint" id="ur-hint"></p>
+      </div>
+      <div class="row">
+        <span class="pill" id="ur-target"></span>
+        <button class="btn" id="btn-ur-discard" disabled>Descartar alterações</button>
+        <button class="btn btn-primary" id="btn-ur-save" disabled>Salvar mudanças</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ur-groups"></div>
+
+</section>
+
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,704 @@
+:root {
+  --bg: #0f1115;
+  --bg-soft: #161a21;
+  --card: #1a1f28;
+  --card-hover: #202632;
+  --line: #2a313d;
+  --text: #e6e9ef;
+  --muted: #8b93a3;
+  --accent: #5b9cff;
+  --accent-dark: #3b7de0;
+  --green: #4ade80;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --cyan: #38bdf8;
+  --gold: #f7c948;
+  --purple: #a78bfa;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* a página é uma tela só: o cabeçalho fica, o miolo rola por dentro */
+body { display: flex; flex-direction: column; }
+
+.mono, code, .log {
+  font-family: "Cascadia Mono", "Consolas", ui-monospace, "Courier New", monospace;
+}
+
+h1 { font-size: 1.15rem; margin: 0; }
+h2 { font-size: 1rem; margin: 0 0 .35rem; letter-spacing: .01em; }
+h3 { font-size: .95rem; margin: 0; }
+p { margin: .3rem 0; }
+
+/* ------------------------------------------------------------------ topo */
+/* duas linhas: título + ferramenta, e as abas da ferramenta escolhida */
+.header {
+  flex: 0 0 auto; z-index: 30;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar {
+  display: flex; align-items: center; gap: 1.6rem;
+  padding: .55rem 1.5rem;
+}
+.brand { display: flex; align-items: center; gap: .7rem; }
+.logo {
+  font-size: 1.25rem; width: 34px; height: 34px; display: grid; place-items: center;
+  background: linear-gradient(135deg, #2a3446, #1d2531);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.sub { color: var(--muted); font-size: .74rem; margin: 0; line-height: 1.1; }
+.arrow { color: var(--accent); }
+
+/* primeiro nível: a ferramenta (conversor ou atualizador) */
+.tools { display: flex; gap: .4rem; }
+.tool {
+  display: flex; flex-direction: column; gap: 0; align-items: flex-start;
+  background: var(--bg); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: .3rem .85rem; cursor: pointer; font-size: .9rem; line-height: 1.25;
+}
+.tool:hover { color: var(--text); }
+.tool.active {
+  background: var(--card); color: var(--text);
+  border-color: var(--accent); box-shadow: inset 0 2px 0 var(--accent);
+}
+.tool-sub { font-size: .68rem; color: var(--muted); font-weight: 400; }
+
+/* segundo nível: as abas da ferramenta escolhida */
+.tabs {
+  display: flex; gap: .25rem;
+  padding: 0 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.tab {
+  background: none; border: none; color: var(--muted);
+  padding: .45rem 1rem; cursor: pointer; font-size: .86rem;
+  border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* o miolo é quem rola: as abas de revisão passam da tela, as principais não */
+main { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.5rem; }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* entradas/saídas · conversão · detalhes — três colunas iguais que cabem numa
+   tela só: a página não rola, cada coluna rola por dentro */
+.panel.split.active {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
+  align-items: stretch;
+  height: 100%;
+}
+.hidden { display: none !important; }
+
+@media (max-width: 1400px) {
+  .panel.split.active {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    height: auto;
+  }
+  .col-detail { grid-column: 1 / -1; }
+  .col-card { max-height: 70vh; }
+}
+@media (max-width: 900px) {
+  .panel.split.active { grid-template-columns: minmax(0, 1fr); }
+  .col-detail { grid-column: auto; }
+}
+
+.col-lists, .col-conversion, .col-detail { min-width: 0; min-height: 0; }
+
+/* o card ocupa a coluna inteira e não deixa o conteúdo empurrar a página */
+.col-card {
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0; margin-bottom: 0;
+  overflow: hidden;
+}
+
+/* só o que está marcado rola por dentro */
+.scroller { overflow-y: auto; min-height: 0; }
+.scroller::-webkit-scrollbar { width: 9px; }
+.scroller::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: 999px;
+}
+.scroller::-webkit-scrollbar-thumb:hover { background: #3a4353; }
+
+/* entrada × saída: um lado por vez, no mesmo card */
+.switch {
+  display: flex; gap: .25rem; margin: -.2rem 0 .7rem;
+  border-bottom: 1px solid var(--line);
+}
+.switch button {
+  background: none; border: none; color: var(--muted);
+  padding: .3rem .7rem; cursor: pointer; font-size: .86rem;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.switch button:hover { color: var(--text); }
+.switch button.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.side { display: none; min-height: 0; }
+.side.active { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+/* os seletores do atualizador lado a lado, para sobrar altura para a lista */
+.fields { align-items: flex-end; gap: .5rem; margin-top: .3rem; }
+.fields label { flex: 1 1 130px; min-width: 0; }
+.fields .section-label { display: block; }
+
+/* rótulo e versão do pack na mesma linha, sem quebrar a coluna */
+.loader-label {
+  display: flex; gap: .3rem; align-items: baseline;
+  white-space: nowrap; overflow: hidden;
+}
+.loader-label .hint { text-overflow: ellipsis; overflow: hidden; }
+
+/* o corpo do job cresce até o fim da coluna; o log fica com o que sobrar */
+.job-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.job-body .log { flex: 1; min-height: 90px; }
+
+/* caminhos longos não podem furar o card */
+.path { word-break: break-all; overflow-wrap: anywhere; }
+
+/* ----------------------------------------------------------------- cards */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: .9rem 1rem;
+  margin-bottom: 1.1rem;
+}
+
+.hint { color: var(--muted); font-size: .84rem; }
+.row { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+.row.space { justify-content: space-between; align-items: flex-start; }
+
+/* --------------------------------------------------------------- botões */
+.btn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: .5rem .9rem; font-size: .88rem;
+  background: var(--bg-soft); color: var(--text);
+  cursor: pointer; text-decoration: none; transition: .15s;
+}
+.btn:hover:not(:disabled) { background: var(--card-hover); border-color: #3a4353; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--accent-dark); border-color: var(--accent); }
+.btn-primary:hover:not(:disabled) { background: var(--accent); }
+.btn-ghost { background: transparent; }
+.btn-sm { padding: .3rem .6rem; font-size: .8rem; }
+
+.input {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: .45rem .65rem; font-size: .86rem; min-width: 180px;
+}
+.input:focus { outline: none; border-color: var(--accent); }
+.input.full { width: 100%; min-width: 0; }
+
+/* ------------------------------------------------------------- pílulas */
+.pill {
+  font-size: .75rem; padding: .2rem .6rem; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--bg);
+}
+.pill-ok { color: var(--green); border-color: #29513c; background: #16241d; }
+.pill-bad { color: var(--red); border-color: #5a2b2b; background: #241717; }
+.pill-warn { color: var(--yellow); border-color: #5a4a1e; background: #241f10; }
+.pill-muted { color: var(--muted); }
+
+/* quando a pílula só carrega tags, ela some e deixa as tags aparecerem */
+#mc-pill, #ur-target {
+  border: none; background: none; padding: 0; display: flex; gap: .3rem;
+}
+
+.badge {
+  background: var(--line); color: var(--text);
+  border-radius: 999px; padding: 0 .45rem; font-size: .72rem; margin-left: .3rem;
+}
+.badge.hot { background: var(--accent-dark); }
+
+/* ----------------------------------------------------------- lista packs */
+.pack-list { display: flex; flex-direction: column; gap: .5rem; margin: .6rem 0; }
+.pack {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  padding: .6rem .8rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg-soft); cursor: pointer;
+}
+.pack:hover { background: var(--card-hover); }
+.pack.selected { border-color: var(--accent); background: #1b2534; }
+
+/* o que está sendo processado agora: vai para o topo e se destaca sozinho —
+   dá para clicar em outro para ver detalhes sem perder isto de vista */
+.pack.working {
+  border-color: var(--green); background: #14211b;
+}
+.pack.working .name { color: var(--green); font-weight: 600; }
+
+/* a saída recém-gerada: verde até você escolher outra coisa — é onde o
+   resultado do que você acabou de fazer foi parar */
+.pack.fresh { border-color: var(--green); background: #14211b; }
+.pack.fresh .name::after {
+  content: "novo"; margin-left: .45rem; font-size: .66rem; font-weight: 600;
+  color: var(--green); border: 1px solid #29513c; background: #16241d;
+  border-radius: 5px; padding: 0 .3rem; vertical-align: 1px;
+}
+
+/* os números do resumo, cada um com o seu significado */
+.num { font-weight: 600; }
+.num.ok { color: var(--green); }
+.num.picked { color: var(--purple); }
+.num.warn { color: var(--yellow); }
+
+/* o pack do trabalho aberto continua marcado depois de terminar */
+.pack.in-job { border-color: #3a4d6b; }
+.in-job-tag {
+  color: var(--accent); border-color: #2c3f63; background: #151d2c;
+  font-size: .68rem;
+}
+
+.btn-danger { border-color: var(--red); color: var(--red); }
+.btn-danger:hover:not(:disabled) { background: #241717; border-color: var(--red); }
+
+.bye {
+  display: grid; place-items: center; gap: .3rem;
+  height: 100vh; text-align: center;
+}
+
+.spinner {
+  display: inline-block; width: 10px; height: 10px; margin-right: .35rem;
+  border: 2px solid #2f5741; border-top-color: var(--green);
+  border-radius: 50%; animation: girar .7s linear infinite;
+  vertical-align: -1px;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+.pack .name { font-size: .9rem; }
+.pack .meta {
+  color: var(--muted); font-size: .78rem;
+  display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .35rem;
+  line-height: 1.6;
+}
+
+/* -------------------------------------------------------------- dropzone */
+.dropzone {
+  border: 1px dashed var(--line); border-radius: var(--radius);
+  padding: 1.2rem; text-align: center; color: var(--muted);
+  transition: .15s;
+}
+.dropzone.drag { border-color: var(--accent); background: #17202c; color: var(--text); }
+.dropzone p { margin: 0 0 .5rem; font-size: .88rem; }
+
+.topbar-right { display: flex; align-items: center; gap: .6rem; margin-left: auto; }
+
+/* --------------------------------------------------------- configurações */
+.settings-wrap { position: relative; }
+
+#btn-settings { font-size: 1rem; line-height: 1; padding: .35rem .55rem; }
+#btn-settings.open { border-color: var(--accent); color: var(--accent); }
+
+.settings {
+  position: absolute; right: 0; top: calc(100% + .5rem); z-index: 40;
+  width: min(460px, calc(100vw - 2rem));
+  display: flex; flex-direction: column; max-height: 78vh;
+  background: var(--card); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: .9rem 1rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+}
+.settings-head { margin-bottom: .5rem; }
+.settings-head h2 { margin: 0; }
+.settings-body { padding-right: .3rem; }
+
+.setting { margin-bottom: .7rem; }
+.setting-title {
+  display: flex; align-items: baseline; gap: .5rem; margin-bottom: .15rem;
+}
+.setting-title label { font-size: .85rem; }
+/* Etiqueta contornada como as do loader e a `.pill-warn`: mesmo amarelo de
+   aviso sobre fundo escuro. Não azul, que aqui é botão primário e versão do
+   Minecraft; não preenchido, que num símbolo sozinho vira um bloco de tinta.
+   Precisa ser `.tag.setting-link`: a regra base `.tag` vem depois no arquivo e,
+   com a mesma especificidade, ganharia o cinza dela na cor e na borda. */
+.tag.setting-link {
+  padding: .05rem .35rem; font-size: .82rem; line-height: 1.25;
+  color: var(--yellow); border-color: #5a4a1e; background: #241f10;
+}
+.tag.setting-link:hover { background: #332b16; }
+.setting .hint { display: block; font-size: .76rem; line-height: 1.3; }
+
+/* slider e número lado a lado: o slider é para achar, a caixa é para precisar */
+.setting .row { gap: .5rem; margin-top: .25rem; }
+.setting input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.setting input[type="number"] { width: 82px; min-width: 0; }
+.setting .input { min-width: 0; }
+
+.setting-group {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: .9rem 0 .4rem; padding-bottom: .2rem;
+  border-bottom: 1px solid var(--line);
+}
+.setting-group:first-child { margin-top: 0; }
+
+.secret-row { display: flex; gap: .4rem; }
+.secret-row .input { flex: 1; }
+.secret-actions { margin-top: .35rem; }
+.settings-actions { margin-top: .7rem; flex-wrap: wrap; }
+.settings .notice { margin-top: .6rem; }
+
+.upload-progress {
+  display: flex; align-items: center; gap: .7rem;
+  margin-top: .8rem; font-size: .8rem; color: var(--muted);
+}
+.upload-progress .bar { flex: 1; }
+
+.search-box { margin-top: .6rem; }
+
+/* -------------------------------------------------------------- progresso */
+.progress-head {
+  display: flex; justify-content: space-between; font-size: .84rem;
+  color: var(--muted); margin-bottom: .35rem;
+}
+.bar { height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }
+.fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-dark), var(--accent)); transition: width .25s; }
+.fill.indeterminate {
+  width: 35% !important;
+  animation: slide 1.1s ease-in-out infinite alternate;
+}
+@keyframes slide { from { margin-left: 0; } to { margin-left: 65%; } }
+
+.log {
+  margin-top: .7rem; overflow-y: auto;
+  background: #0c0e13; border: 1px solid var(--line); border-radius: 8px;
+  padding: .6rem .7rem; font-size: .78rem; line-height: 1.5;
+}
+.log div { white-space: pre-wrap; word-break: break-word; min-height: 1.05em; }
+.log .ok { color: var(--green); }
+.log .warn { color: var(--yellow); }
+.log .error { color: var(--red); }
+.log .cyan { color: var(--cyan); }
+.log .dim { color: var(--muted); }
+.log .info { color: #c8cedb; }
+
+/* ---------------------------------------------------------------- stats */
+/* -------------------- seções de conflitos: três colunas lado a lado */
+/* as duas abas de revisão (conflitos do conversor, revisão do atualizador)
+   usam a mesma grade de três colunas iguais */
+#conflict-groups, #ur-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
+  align-items: start;
+}
+
+@media (max-width: 1400px) {
+  #conflict-groups, #ur-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  #conflict-groups, #ur-groups { grid-template-columns: minmax(0, 1fr); }
+}
+
+.conflict-section { min-width: 0; }
+
+/* título e contagem numa linha, explicação sempre embaixo — sem depender
+   da largura da coluna para decidir se quebra */
+/* título, contagem e a ação em massa na mesma linha; a explicação embaixo */
+.conflict-section > header {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: center;
+  gap: .4rem .5rem; margin-bottom: .7rem;
+}
+.conflict-section > header .hint {
+  grid-column: 1 / -1; margin: 0; font-size: .78rem; line-height: 1.35;
+}
+.conflict-section > header .btn { justify-self: end; }
+.conflict-section h2 { margin: 0; }
+.conflict-section.empty { opacity: .55; }
+
+/* enquanto o pack é gerado, mexer aqui não teria efeito nenhum: fica apagado e
+   sem cliques, sem precisar de aviso escrito */
+.locked { opacity: .45; pointer-events: none; }
+
+/* numa coluna estreita as linhas precisam poder quebrar */
+.file-row, .search-row { flex-wrap: wrap; }
+.file-row > div:first-child, .search-row > div:first-child { min-width: 0; flex: 1 1 200px; }
+.file-row .btn, .search-row .btn { flex: 0 0 auto; }
+
+.compat {
+  font-size: .7rem; padding: .1rem .4rem; border-radius: 5px;
+  color: var(--green); border: 1px solid #29513c; background: #16241d;
+}
+.file-row.compatible { border-color: #2f5741; }
+
+/* o arquivo exatamente igual ao do pack — o alvo ideal */
+.exact-tag {
+  font-size: .7rem; padding: .1rem .4rem; border-radius: 5px;
+  color: #10151f; background: var(--gold); font-weight: 600;
+}
+.file-row.exact {
+  border-color: var(--gold);
+  background: #2a2413;
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+/* ------------------------------------------------------------- conflitos */
+.conflict {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); margin-bottom: .8rem; overflow: hidden;
+}
+.conflict.resolved { border-color: #2f5741; }
+.conflict-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: .8rem; padding: .8rem 1rem; cursor: pointer;
+}
+.conflict-head:hover { background: var(--card-hover); }
+
+/* o texto ocupa o espaço que sobrar e quebra dentro dele; os botões nunca
+   descem de linha nem mudam de tamanho */
+.conflict-title {
+  display: flex; flex-direction: column; gap: .2rem;
+  min-width: 0; flex: 1 1 auto;
+}
+.conflict-head > .row { flex: 0 0 auto; align-items: center; }
+.conflict-file { font-size: .9rem; word-break: break-all; }
+.conflict-chosen { display: flex; align-items: baseline; gap: .3rem; }
+.conflict-chosen .arrow-to { color: var(--muted); flex: 0 0 auto; }
+.conflict-chosen .value { word-break: break-all; }
+.conflict-body { padding: 0 1rem 1rem; border-top: 1px solid var(--line); }
+.conflict-body.collapsed { display: none; }
+
+.tag {
+  font-size: .72rem; padding: .15rem .5rem; border-radius: 6px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.tag.version { color: var(--cyan); border-color: #1f4a63; background: #10222c; }
+.tag.missing { color: var(--red); border-color: #5a2b2b; background: #241717; }
+.conflict.missing { border-color: #4a2626; }
+.tag.done { color: var(--green); border-color: #29513c; background: #16241d; }
+
+.file-list, .search-results { display: flex; flex-direction: column; gap: .35rem; margin-top: .6rem; max-height: 330px; overflow-y: auto; }
+.file-row, .search-row {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  padding: .5rem .7rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg-soft); font-size: .84rem;
+}
+.file-row:hover, .search-row:hover { background: var(--card-hover); }
+.file-row.match { border-color: var(--green); }
+.file-row .name { word-break: break-all; }
+.file-meta { color: var(--muted); font-size: .76rem; display: flex; gap: .6rem; flex-wrap: wrap; }
+
+.project-info { display: flex; align-items: flex-start; gap: .7rem; min-width: 0; }
+.project-info .summary {
+  color: var(--muted); font-size: .78rem; margin-top: .15rem;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.project-header {
+  display: flex; align-items: center; gap: .7rem;
+  padding: .6rem .7rem; margin-top: .8rem;
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px;
+}
+
+/* o mod original (Modrinth), para comparar com os candidatos do CurseForge */
+.mod-reference {
+  display: flex; align-items: center; gap: .7rem;
+  padding: .6rem .7rem; margin: .2rem 0 .4rem;
+  background: #16202c; border: 1px solid #23384a; border-radius: 8px;
+}
+.mod-reference .info { min-width: 0; flex: 1 1 auto; }
+.mod-reference .name { font-size: .9rem; word-break: break-word; }
+.mod-reference .file-meta { display: block; word-break: break-all; }
+.mod-reference .tag { flex: 0 0 auto; }
+.mod-reference a { display: inline-block; margin-top: .15rem; }
+
+.logo-thumb {
+  width: 40px; height: 40px; flex: 0 0 40px;
+  border-radius: 8px; border: 1px solid var(--line);
+  object-fit: cover; background: var(--bg);
+}
+.logo-thumb.placeholder {
+  display: grid; place-items: center;
+  color: var(--muted); font-weight: 600; font-size: 1.05rem;
+}
+
+.section-label { font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: .9rem 0 .2rem; }
+
+/* ---------------------------------------------------------------- tabela */
+
+/* --------------------------------------------------- conversão / avisos */
+.pack.selected { border-color: var(--accent); }
+.card.conversion { border-color: #2f3a4d; }
+.warn-text { color: var(--yellow); }
+.detail-actions { margin-top: .9rem; }
+.job-source { color: var(--muted); font-size: .82rem; margin: .1rem 0 .7rem; }
+.start-row { margin-top: .9rem; }
+.job-actions { margin-top: .9rem; }
+
+.notice {
+  margin-top: .9rem; padding: .7rem .85rem; border-radius: 8px;
+  font-size: .85rem; border: 1px solid var(--line); background: var(--bg-soft);
+}
+.notice.warn { border-color: #5a4a1e; background: #241f10; }
+.notice.ok { border-color: #29513c; background: #16241d; }
+.notice.bad { border-color: #5a2b2b; background: #241717; color: var(--red); }
+.notice .unsaved { margin-top: .4rem; color: var(--yellow); }
+.unsaved-inline { color: var(--yellow); }
+
+/* aviso + botões ficam num bloco só, e o popup se sobrepõe a ele: o log não
+   muda de tamanho quando você abre a confirmação.
+   O bloco tem altura mínima para o popup caber sem invadir o log — e o popup
+   nunca passa dela (`max-height: 100%` + rolagem própria). */
+/* a altura é reservada de propósito, mesmo com o popup fechado: é o que
+   impede o log de mudar de tamanho na hora de confirmar. O valor é o do maior
+   popup possível (4 itens + botões), para sobrar o mínimo. */
+.job-head {
+  position: relative; flex: 0 0 auto;
+  min-height: 150px; margin-top: .5rem;
+}
+.job-head .notice { margin-top: 0; }
+
+.confirm {
+  position: absolute; left: 0; right: 0; top: 0;
+  max-height: 100%; overflow-y: auto;
+  padding: .5rem .65rem; border-radius: 8px;
+  border: 1px solid var(--accent); background: #16202e;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
+}
+.confirm h3 { margin-bottom: .2rem; font-size: .84rem; }
+.confirm ul { margin: .15rem 0 .5rem; padding-left: .95rem; font-size: .79rem; }
+.confirm li { margin: .08rem 0; line-height: 1.3; }
+
+/* -------------------------------------------------------------- detalhes */
+/* quem limita a altura é o `.col-card`; aqui só o espaçamento interno */
+.detail .kv-list { margin-bottom: .6rem; }
+
+/* ------------------------------------------------- decisões de um registro */
+.decision-group { margin-top: .9rem; }
+.decision-group h3 {
+  display: flex; align-items: center; gap: .5rem;
+  font-size: .85rem; margin-bottom: .4rem;
+}
+.decision-group .count { color: var(--muted); font-weight: 400; font-size: .8rem; }
+.decision .line { display: flex; gap: .5rem; margin-top: .2rem; font-size: .8rem; }
+.decision .line .label { color: var(--muted); flex: 0 0 68px; }
+.decision .line .value { word-break: break-all; }
+.decision.manual { border-color: #2c4a6b; }
+.decision.version { border-color: #1f4a63; }
+.decision.missing { border-color: #4a2626; }
+.value.ok { color: var(--green); }
+.value.bad { color: var(--red); }
+.value.warn { color: var(--yellow); }
+.value.cyan { color: var(--cyan); }
+.value.dim { color: var(--muted); }
+/* ------------------------------------- revisão das mudanças do atualizador */
+/* a aba usa as mesmas peças da aba de conflitos (.conflict-section, .conflict…);
+   só a origem do card resolvido ganha cor própria */
+
+/* resolvido a partir de um arquivo que não tinha versão para o alvo */
+.conflict.resolved.from-missing { border-color: #2f5741; }
+
+/* entrou na versão atual pelo botão dos não-mods: verde escuro, e vai para o
+   fim da seção — é decisão em massa, não escolha item a item */
+.conflict.resolved.as-is {
+  border-color: #24503a; background: #121b17; opacity: .9;
+}
+.conflict.resolved.as-is .conflict-file { color: var(--muted); }
+
+/* resolvido trocando a versão de um mod que já tinha versão: roxo, porque ali
+   você contrariou o que a análise propôs — e esses vêm no topo da seção */
+.conflict.resolved.from-version {
+  border-color: var(--purple); background: #1e1730;
+}
+.conflict.resolved.from-version .conflict-chosen .value { color: var(--purple); }
+
+/* "fica na versão atual": nada muda neste arquivo */
+.conflict.kept { opacity: .7; border-style: dashed; }
+
+/* a versão que já está no pack, para comparar sem sair da tela */
+.file-row.in-pack { border-color: #3a4353; background: #191d25; }
+.in-pack-tag {
+  font-size: .7rem; padding: .1rem .4rem; border-radius: 5px;
+  color: var(--muted); border: 1px solid var(--line); background: var(--bg);
+}
+
+/* versão do Minecraft e loader — as mesmas tags na entrada e nos conflitos.
+   A cor do Minecraft vem do JS (gradiente por versão); aqui fica o padrão. */
+.tag.mc { color: var(--accent); border-color: #2c3f63; background: #151d2c; }
+.tag.mc.is-target { box-shadow: inset 0 0 0 1px currentColor; font-weight: 600; }
+.tag.more { color: var(--muted); }
+/* magenta: é a única faixa de cor que nem o gradiente do Minecraft nem os
+   loaders usam, então a contagem não se confunde com nada */
+.tag.mods { color: #d79bc4; border-color: #4d2f44; background: #241820; }
+
+/* cada loader com a sua cor: dá para reconhecer sem ler */
+.tag.loader { color: var(--muted); }
+.tag.loader.l-fabric { color: #d9b26a; border-color: #4a3f1c; background: #221d10; }
+.tag.loader.l-quilt { color: #c99bf0; border-color: #43305a; background: #1e1528; }
+.tag.loader.l-forge { color: #8fa6d8; border-color: #2f3c5c; background: #151a26; }
+.tag.loader.l-neoforge { color: #f0a071; border-color: #5c3a24; background: #261a13; }
+
+.warn-text { color: var(--gold); }
+
+.summary-line {
+  margin-top: .9rem; padding: .5rem .7rem; border-radius: 8px;
+  background: var(--bg-soft); border: 1px solid var(--line); font-size: .82rem;
+}
+.detail-title { color: var(--muted); font-size: .8rem; margin: .15rem 0 .6rem; word-break: break-all; }
+.summary-box { margin-top: .7rem; }
+
+.kv-list { margin-top: .7rem; display: flex; flex-direction: column; gap: .1rem; }
+.kv {
+  display: flex; justify-content: space-between; gap: 1rem;
+  padding: .3rem .1rem; border-bottom: 1px solid var(--line); font-size: .85rem;
+}
+.kv:last-child { border-bottom: none; }
+.kv span { color: var(--muted); }
+.kv.ok strong { color: var(--green); }
+.kv.warn strong { color: var(--yellow); }
+.kv.bad strong { color: var(--red); }
+
+.mod-list, .decision-list {
+  margin-top: .5rem; max-height: 320px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+.mod-row, .decision {
+  padding: .4rem .6rem; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--bg-soft); font-size: .83rem;
+}
+.mod-row .name, .decision .name { word-break: break-all; }
+.decision .file-meta { margin-top: .15rem; align-items: center; }
+
+/* ----------------------------------------------------------------- toast */
+/* avisos: canto inferior direito, mas grandes o bastante para serem notados */
+.toast {
+  position: fixed; bottom: 1.4rem; right: 1.4rem;
+  min-width: 300px; max-width: 460px;
+  background: var(--card); border: 2px solid var(--accent);
+  border-radius: 10px; padding: .85rem 1.1rem;
+  font-size: .95rem; font-weight: 500;
+  box-shadow: 0 10px 40px rgba(0,0,0,.55);
+  z-index: 60;
+  animation: toast-in .18s ease-out;
+}
+.toast.error { border-color: var(--red); color: var(--red); background: #241717; }
+.toast.ok { border-color: var(--green); color: var(--green); background: #16241d; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+a { color: var(--accent); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2b3240; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }

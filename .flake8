@@ -1,0 +1,5 @@
+[flake8]
+# o projeto é escrito no limite do Black (88), não nos 79 do default
+max-line-length = 88
+extend-ignore = E203, W503
+exclude = .venv, .git, __pycache__, .cache, output_modpacks, input_modpacks
