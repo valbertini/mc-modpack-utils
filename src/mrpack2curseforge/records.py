@@ -44,6 +44,10 @@ def _mod_entry(result: MatchResult) -> dict[str, Any]:
         "file_id": result.file_id,
         "project_name": result.project_name,
         "project_slug": result.project_slug,
+        "project_author": result.project_author,
+        # o arquivo já vinha em overrides/; sem isso a regeração o trataria como
+        # um item do índice e tentaria baixá-lo (ele não tem URL)
+        "from_overrides": result.mod.from_overrides,
         "modrinth_title": result.modrinth.title if result.modrinth else None,
         "modrinth_slug": result.modrinth.slug if result.modrinth else None,
         "queries_tried": result.queries_tried,
@@ -58,6 +62,7 @@ def _mod_entry(result: MatchResult) -> dict[str, Any]:
                 "closest_file_id": diagnosis.closest_file_id,
                 "closest_file_name": diagnosis.closest_file_name,
                 "matched_reference": diagnosis.matched_reference,
+                "section": diagnosis.section,
             }
             if diagnosis
             else None
@@ -206,10 +211,15 @@ def results_from_record(record: dict[str, Any], pack) -> list[MatchResult]:
     by_path = {entry["file_path"]: entry for entry in record.get("mods", [])}
     results: list[MatchResult] = []
 
-    for mod in pack.mods:
+    for mod in pack.convertible:
         entry = by_path.get(mod.file_path)
 
         if not entry:
+            if mod.from_overrides:
+                # nunca esteve no manifest; continua em overrides/, sem virar
+                # um "não convertido" que a tela mandaria baixar
+                continue
+
             # o .mrpack mudou desde a conversão: trata como não convertido
             results.append(MatchResult(mod=mod))
             continue
@@ -224,6 +234,7 @@ def results_from_record(record: dict[str, Any], pack) -> list[MatchResult]:
                 file_id=entry.get("file_id"),
                 project_name=entry.get("project_name"),
                 project_slug=entry.get("project_slug"),
+                project_author=entry.get("project_author"),
                 queries_tried=entry.get("queries_tried") or [],
                 diagnosis=Diagnosis(**diagnosis_data) if diagnosis_data else None,
             )

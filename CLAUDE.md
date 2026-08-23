@@ -6,8 +6,9 @@ Duas ferramentas sobre modpacks `.mrpack` (Modrinth), na mesma base de código:
 
 1. **Converter** para o CurseForge — não é tradução de manifest: o projeto
    **procura os projetos equivalentes** e só aceita um match quando encontra lá o
-   mesmo arquivo `.jar`. O que não for encontrado é baixado do Modrinth e vai para
-   `overrides/mods`.
+   mesmo arquivo. Vale para mod, resourcepack e shader — e também para o que já
+   viajava dentro do `overrides/` do mrpack. O que não for encontrado é baixado
+   do Modrinth e vai para `overrides/`.
 2. **Atualizar os mods** para outra versão do Minecraft — para cada arquivo do
    índice, pega no Modrinth a versão mais recente compatível com a versão alvo e
    monta um `.mrpack` novo. Nada é baixado (o índice já tem URL e hashes).
@@ -41,7 +42,8 @@ src/mrpack2curseforge/
 │   ├── server.py             monta o app: CSP, estáticos e os routers
 │   ├── context.py            AppContext: pastas, JobManager, clientes, guardas
 │   ├── schemas.py            corpos das requisições (pydantic)
-│   ├── payloads.py           formatos que a tela consome (sem FastAPI)
+│   ├── payloads.py           o que a tela consome: pack, projeto, log e
+│   │                         atualização — tudo sem FastAPI
 │   ├── routes/               um módulo por assunto, cada um expõe router(ctx)
 │   │   ├── packs.py          estado da tela, upload, inspeção
 │   │   ├── jobs.py           iniciar, revisar, aplicar, cancelar, baixar
@@ -50,19 +52,24 @@ src/mrpack2curseforge/
 │   │   ├── catalog.py        Minecraft, loaders, Modrinth, CurseForge
 │   │   └── system.py         configurações, cache, encerrar
 │   ├── jobs.py               Job/JobManager: conversão em thread + resoluções
+│   │                         (só o ciclo de vida; payload é do payloads.py)
 │   └── static/               index.html + style.css + app.js (zero dependências)
 ├── config.py                 .env, paths e limites
 ├── settings.py               editor do .env usado pela tela de configurações
 ├── constants.py              endpoints, ids da API, page sizes
-├── domain.py                 PackFile, Modpack, MatchResult, MatchStrategy,
-│                             Diagnosis, MissingReason
+├── domain.py                 PackFile (folder/disabled/override_path), Modpack
+│                             (convertible/plain_extras/override_bytes),
+│                             MatchResult, MatchStrategy, Diagnosis,
+│                             MissingReason
 ├── reporting.py              ConversionReport (só os números) + tabela do CLI
 ├── exceptions.py
 ├── parsers/mrpack.py         zip -> domínio (não conhece CurseForge)
 ├── schemas/modrinth.py       schema do modrinth.index.json
 ├── services/
+│   ├── http.py               retentativa, backoff e 429 — a política dos dois
+│   │                         clientes, num lugar só
 │   ├── modrinth.py           SHA1 -> project_id -> slug/title (em lote)
-│   ├── curseforge.py         HTTP puro: search, files, cache, retries, 429
+│   ├── curseforge.py         HTTP puro: search, files, cache (sem heurística)
 │   ├── matcher.py            ⭐ toda a heurística mora aqui
 │   ├── downloader.py         download + verificação de SHA1
 │   └── cache.py              cache persistente em SQLite (thread-safe)
@@ -72,8 +79,20 @@ src/mrpack2curseforge/
     └── package.py              zip final
 
 tests/                 pytest, sem rede (cliente do CurseForge é falso)
-tools/check_ui.js      estados da interface num DOM de mentira (node, sem deps)
+└── ui/                a interface, sem navegador (node, sem dependências)
+    ├── fake_dom.js    o DOM de mentira em que o app.js roda
+    ├── check_ui.js    asserções por estado, com dados escritos à mão
+    └── render_real.js a mesma tela com o payload de um job de verdade
+tools/                 o que você roda, não o que é verificado
+├── check_all.py       a bateria inteira num comando
+└── capture_job.py     captura o payload real (precisa de rede e da chave)
 ```
+
+A divisão entre as duas pastas é essa: **`tests/` afirma, `tools/` faz.**
+`check_ui.js` e `render_real.js` quebram a bateria quando algo está errado, então
+são teste — deixá-los em `tools/` escondia 128 asserções de quem procura em
+`tests/`. O `capture_job.py` não afirma nada e **precisa de rede**, o que o
+proíbe de morar em `tests/`.
 
 Antes de dar por pronto, **um comando**:
 
@@ -81,8 +100,8 @@ Antes de dar por pronto, **um comando**:
 uv run python tools/check_all.py
 ```
 
-Roda o `pytest` (153 testes, nenhum toca a rede), o `flake8` (88 colunas,
-importes e variáveis sem uso), o `tools/check_ui.js` (102 asserções sobre os
+Roda o `pytest` (193 testes, nenhum toca a rede), o `flake8` (88 colunas,
+importes e variáveis sem uso), o `tests/ui/check_ui.js` (128 asserções sobre os
 estados da interface) e o `node --check`. É um script para não precisar de pipe
 nem `$(...)` no shell — os dois travam a sessão pedindo aprovação.
 
@@ -102,6 +121,12 @@ CLI
      └─ save_record         output_modpacks/conversions/<pack>.json
 ```
 
+O `manifest.json` sai no formato do export oficial: `overrides` antes de
+`files`, `isLocked: false` em cada entrada e `required: false` para o que era
+`.jar.disabled` no mrpack (é assim que o launcher reinstala um mod desligado).
+Fica de fora só o `image`/`profileImage/`, que aponta para o ícone da instância —
+o `.mrpack` não tem ícone nenhum.
+
 Regras de camada:
 
 - o parser **nunca** conhece CurseForge;
@@ -109,21 +134,32 @@ Regras de camada:
 - toda heurística de matching fica **apenas** em `services/matcher.py`;
 - `services/curseforge.py` é transporte puro (sem heurística);
 - respostas da API passam por `slim_project`/`slim_file` antes de circular: só os
-  campos usados sobrevivem (o resto inflava o cache em ~7x e não servia para nada).
+  campos usados sobrevivem (o resto inflava o cache em ~7x e não servia para nada);
+- retentativa, backoff e `429` moram **só** em `services/http.py`: os dois
+  clientes tinham o mesmo laço em cópias que já começavam a divergir.
 
 ---
 
 ## Matcher (o coração)
 
-Para cada mod, na ordem, parando na primeira que confirmar:
+**A pasta do arquivo escolhe a seção.** `mods/` → `classId` 6, `resourcepacks/`
+→ 12, `shaderpacks/` → 6552 (`CURSEFORGE_CLASSES`). Sem isso, procurar
+"Low Shield" devolvia 150 mods e nenhum texture pack. A mesma tabela dá a seção
+da URL do site (`CURSEFORGE_SECTIONS`), que só é `mc-mods` para mod.
+
+Para cada arquivo, na ordem, parando na primeira que confirmar:
 
 1. `MODRINTH_SLUG` — lookups exatos (`?slug=`), na ordem: slug do Modrinth, título
-   slugificado e slugs das variações. São 0-ou-1 resultado, então vêm primeiro
+   slugificado e slugs das variações. São 0-ou-1 resultado, então vêm primeiro.
+   Para não-mods, cada slug é tentado também com o prefixo `minecraft-`: o
+   texture pack `3d-default` do Modrinth é `minecraft-3d-default` lá, e a busca
+   textual não o devolve de jeito nenhum
 2. `MODRINTH_TITLE` — busca textual pelo título do Modrinth
 3. `MODRINTH_VARIANT` — outras grafias (`name_variants`, que usa `split_words`
    para entender CamelCase/snake_case): junta (`ExtendedAE`), separa
    (`Vitality Fix`), snake (`extended_ae`) e junções de um espaço por vez
-4. `MODRINTH_LOADER` — nome + loader do pack (`Things fabric`)
+4. `MODRINTH_LOADER` — nome + loader do pack (`Things fabric`). **Só para mod**:
+   resourcepack não tem loader, e o termo só estragaria a busca
 5. `FILENAME_REGEX` — busca pela consulta derivada do nome do arquivo
 6. `FILENAME_SIMPLE` — primeiro token relevante
 
@@ -137,6 +173,26 @@ Confirmação (invariante do projeto):
 > nome** do `.jar` original (`normalize_file_name`: minúsculas, sem extensão, sem
 > `.disabled`, com `%2B`/`%20` decodificados). A **versão continua contando**.
 
+Empate dentro do projeto (`_pick_file`): o nome nem sempre identifica uma
+release. `Low Shield.zip` é o nome de 40 arquivos do mesmo projeto, um por versão
+do Minecraft; e o Cloth Config publica o jar de Fabric e o de NeoForge **com o
+mesmo nome**. A ordem do desempate é `(loader, versão do Minecraft, data)`.
+
+`_loader_rank` tem quatro degraus: declara o loader do pack (0) · declara outro
+que o pack aceita (1 — Quilt roda mod de Fabric) · não declara nada (2 — arquivo
+antigo, ou resourcepack) · declara só loader incompatível (3). **O 3 não veta**:
+num pack Forge com Sinytra Connector há mods de Fabric de propósito, e recusá-los
+mandaria 6 matches certos para `overrides/`. Em vez disso ele vira *reserva* —
+`_find_file_in_candidates` continua procurando e só o usa se nada melhor
+aparecer.
+
+**Arquivos que já estavam em `overrides/`** (`Modpack.override_candidates`)
+também são procurados, com `diagnose=False`: achar tira o arquivo de lá e põe no
+manifest; não achar é o normal deles, e não vira conflito nem gasta diagnóstico.
+O parser só oferece `mods/`, `resourcepacks/` e `shaderpacks/` na raiz, e só
+`.jar`/`.zip` — `.zip.rpo` e `.zip.txt` são packs que o launcher desligou
+renomeando, e não existem no CurseForge com esse nome.
+
 Economia de chamadas:
 
 - `latestFiles` (grátis, vem da busca) é varrido primeiro, em todos os candidatos;
@@ -146,6 +202,9 @@ Economia de chamadas:
 
 Funções puras e testáveis: `normalize_mod_name`, `simple_mod_name`,
 `normalize_file_name`, `similarity`, `symmetric_similarity`, `file_similarity`.
+O separador de CamelCase do `normalize_mod_name` só corta **depois de letra**:
+cortar depois de dígito partia "3D Default" em "3 D" e o filtro de tokens comia
+os dois pedaços, sobrando `"default"`.
 
 ### Diagnóstico (`CurseForgeMatcher.diagnose`)
 
@@ -170,7 +229,23 @@ qual arquivo do Modrinth casou) para o relatório.
 
 ---
 
-## Estado atual (v0.6)
+## Estado atual (v0.24)
+
+Pack "Otimizado 1.21.11" (48 mods + 10 não-mods no índice + 3 candidatos em
+`overrides/`), comparado com o export feito pelo próprio launcher do CurseForge:
+**55 entradas no manifest contra 54 deles, e as 54 estão todas lá**. A 55ª é um
+resourcepack que o mrpack levava em `overrides/` e que o CurseForge publica. Só
+ficam de fora 5 mods sem aquela versão lá — exatamente os mesmos 5 que o export
+oficial também deixou em `overrides/`.
+
+Quatro packs reais medidos com e sem o desempate por loader (v0.25): **7
+arquivos corrigidos, nenhum match perdido** — todos eram jars de Forge indo para
+packs de Fabric, com o mesmo nome do jar certo.
+
+O mesmo modpack instalado nos dois launchers, comparado pasta a pasta (v0.25.1):
+**48/48 mods e 3/3 shaders byte a byte**, 11/11 resourcepacks (um recompactado,
+mesmas 439 entradas e mesmos CRCs) e 323/323 config (três diferem só no carimbo
+de hora que o jogo escreve ao abrir).
 
 Pack de teste com 49 mods: **45 convertidos / 4 em overrides (91.8%)**, ~17s na
 primeira execução e ~8s com cache. Os 4 restantes existem no CurseForge, mas sem
@@ -313,6 +388,21 @@ Updater.apply(outcome, resolutions?, skips?)
   deixa cada número do resumo na sua cor); `_plain()` dá a cor de base da linha:
   neutra se começa com `[bold]`, senão a primeira cor encontrada. Indentação é
   preservada e linha vazia é espaçador.
+- **A versão vai na URL dos estáticos** (`render_index()` serve
+  `/static/app.js?v=0.27.1`). Um front antigo contra um servidor novo é como um
+  campo renomeado no payload vira `NaN` na tela. O `Cache-Control: no-cache` em
+  `/` e `/static/` ajuda ("guarde, mas revalide" — o ETag responde 304), **mas
+  não é retroativo**: o que já está no cache foi guardado sem cabeçalho nenhum.
+  Quem fecha a porta é o `?v=`. E para o caso de a **própria página** ser a
+  velha, a `<meta name="app-version">` é comparada com a versão do `/api/state`
+  e a diferença vira um aviso vermelho pedindo `Ctrl`+`F5` (`conferirVersao`).
+- **O comando `web` abre `.../?v={versão}`, e não a URL nua.** `webbrowser.open`
+  numa URL já aberta **foca a aba** em vez de navegar; a página é uma aplicação
+  de uma tela só, não recarrega sozinha, e o `app.js` velho continua vivo na
+  memória. Reiniciar o servidor trocava o back-end debaixo do front antigo. A
+  versão também aparece no cabeçalho da página e na linha que o terminal
+  imprime: com as duas à vista, "estou na versão nova?" deixa de ser
+  adivinhação.
 - **Cabeçalhos HTTP** entram por um middleware **ASGI puro**
   (`SecurityHeadersMiddleware`). Não troque por `@app.middleware("http")`:
   `BaseHTTPMiddleware` reencaminha o corpo e quebra downloads de arquivo
@@ -329,8 +419,24 @@ Updater.apply(outcome, resolutions?, skips?)
 - **Aviso verde só em `done`.** O `else` final do aviso pegava qualquer job com
   resultado e pintava de verde até o cancelado. Cada estado final tem o seu:
   `cancelled` → neutro, `error` → vermelho, `awaiting_*` → amarelo.
-- **`node tools/check_ui.js`** roda o `app.js` num DOM de mentira e afirma, para
-  cada estado de job, qual aviso e quais botões aparecem — além das três seções
+- **Fixture não pega campo que o servidor esqueceu.** Quando algo aparecer
+  errado na tela e o `check_ui.js` estiver verde:
+
+  ```powershell
+  uv run python tools/capture_job.py "meu pack.mrpack"
+  node tests/ui/render_real.js
+  ```
+
+  Sobe um servidor nas pastas de teste (`test_modpacks/`, nunca nas suas), roda
+  uma análise de verdade, salva o payload e renderiza a tela inteira com ele. Foi o que separou "o código está
+  errado" de "o navegador está com a versão velha" — e a resposta foi a
+  segunda. Fora do `check_all.py` porque precisa de rede e da chave da API.
+- **`node tests/ui/check_ui.js`** roda o `app.js` num DOM de mentira e afirma, para
+  cada estado de job, qual aviso e quais botões aparecem — **e os dois painéis de
+  confirmação**, que é onde um `NaN` chegou à tela do usuário porque só o do
+  atualizador era exercitado. Os "avisos de renderização" do DOM falso
+  (`undefined`, `NaN`, `[object Object]` no HTML) **contam como falha**; antes
+  eram impressos e a linha final dizia "consistente" do mesmo jeito — além das três seções
   da revisão e das cores por origem. Rode junto com o `pytest`: os bugs de estado
   daqui (card verde ao cancelar, botão sobrando) só apareciam abrindo a página.
 - **Aplicar salva o que está na tela.** Nas duas ferramentas, *Aplicar mudanças*
@@ -356,9 +462,11 @@ Updater.apply(outcome, resolutions?, skips?)
   conversor o plano vem do servidor (`outcome.plan`); no atualizador é calculado
   no front (`updatePlan()`), porque lá ele precisa refletir também as decisões
   que ainda não foram salvas.
-- **Ações que jogam trabalho fora pedem dois cliques** (`armarBotao`): cancelar
-  e excluir. O rótulo vira "Cancelar mesmo?" por 4 s e volta sozinho — nada de
-  diálogo modal.
+- **Só o que interrompe trabalho em andamento pede dois cliques**
+  (`armarBotao`): cancelar, encerrar, apagar a chave da API. O rótulo vira
+  "Cancelar mesmo?" por 4 s e volta sozinho — nada de diálogo modal. **Apagar
+  um item de lista não pede**: o ✕ só aparece no card sob o cursor, leva um
+  arquivo escolhido, e o clique a mais só atrapalhava.
 - **A revisão esvazia quando o pack é gerado** (`updateFiles` devolve `[]` se
   `update.packaged`), igual aos conflitos do conversor: não há mais decisão
   pendente. Para mudar de ideia, feche e analise de novo.
@@ -378,6 +486,23 @@ Updater.apply(outcome, resolutions?, skips?)
   não produziu nada** (`fecharJobMorto`/`fecharUpdateMorto`). Um job `cancelled`/`error` aberto ficava dizendo
   "cancelada" enquanto o usuário já tinha seguido adiante. `done` **não** é
   descartado: tem `.zip` para baixar.
+- **O painel de confirmação mostra três contagens e um tamanho**: o que vai
+  para o manifest, o que sai do `overrides/` do mrpack, o que vai ser baixado —
+  e o `zip_mb`, o arquivo final (`≈`, em ciano). Saíram, por não responderem à
+  pergunta que se faz com o dedo sobre o *Continuar*: versão do Minecraft,
+  loader, nome do `.zip`, barra de proporção, a contagem de arquivos copiados do
+  `overrides/` e — na v0.27.1 — os outros três tamanhos (manifest, desconto,
+  download), que diziam *de onde vêm os bytes*. **`plan()` devolve exatamente o
+  que o card mostra**; campo que ninguém lê é peso morto.
+- **O peso do `overrides/` é o comprimido** (`Modpack.override_bytes`, somado de
+  `ZipInfo.compress_size` no parser; o mesmo vale para o `file_size` dos
+  `override_candidates`). No pack de teste são 6,7 MB dentro do zip contra 33,7
+  MB crus — usar o tamanho aberto erraria a estimativa em 27 MB, porque
+  `config/` é texto. Para `.jar`/`.zip` os dois coincidem.
+- **`test_modpacks/` é do ferramental, não da interface.** `Config.TEST_INPUT_DIR`
+  / `TEST_OUTPUT_DIR` existem para o `tools/capture_job.py` e para quem está
+  desenvolvendo rodar sem sujar `input_modpacks/`. A tela não sabe que elas
+  existem, e as configurações também não — é isso que as torna seguras.
 - **Cada ferramenta tem a sua seleção.** `state.selection` é do conversor
   (entrada/registro) e `state.selectedUpdate` é do atualizador — dividir a mesma
   variável fazia escolher um pack de um lado desmarcar o do outro.
@@ -443,6 +568,13 @@ Updater.apply(outcome, resolutions?, skips?)
   re-renderiza os campos; sem parar o borbulho, o elemento clicado sai do DOM,
   o `closest(".settings-wrap")` do listener global dá `null` e o painel se
   fecha achando que o clique foi fora.
+- **Nada apaga uma pasta inteira.** O botão *Limpar* por pasta existiu até a
+  v0.26 e saiu com a rota e o módulo `storage.py` juntos: dois cliques não
+  compensam um botão fixo cujo pior caso é a tarde inteira. Quem apaga é o **✕
+  de cada card** (`botaoLixeira`/`ligarLixeiras`), o mesmo nas três listas —
+  entrada, conversões salvas e packs atualizados. Apagar um registro leva o
+  `.zip` junto: sem o registro ele não aparecia em lista nenhuma e só ocupava
+  disco. `stopPropagation` no ✕ — senão o mesmo clique seleciona o card.
 - **Limpar cache** (`DELETE /api/cache`, botão no topo) usa o mesmo
   `services.cache.clear_cache()` do `clear-cache` do CLI, e fecha antes o cliente
   compartilhado do CurseForge. **Todo `ModrinthClient` tem de ser aberto junto com
@@ -464,6 +596,8 @@ o matcher desiste.
 - Aplicar filtro de loader (`modLoaderType`) como desempate na busca.
 - Match por fingerprint murmur2 (exige baixar os jars — ver `DECISIONS.md` §5).
 - Suporte a `datapacks/` como projetos do CurseForge (hoje vão para `overrides`).
+  O `classId` existe (6945); falta um pack de teste para conferir onde o launcher
+  instala o arquivo — datapack no lugar errado não avisa, só não carrega.
 - Modo `--dry-run` (relatório sem baixar nada nem gerar zip).
 - Publicar no PyPI / CI.
 
@@ -477,3 +611,5 @@ o matcher desiste.
   Fabric API fazia).
 - **Lista manual de aliases** — desnecessária: o nome real vem da API do Modrinth.
 - **Baixar todos os jars para calcular fingerprint** — custo alto demais para o ganho.
+- **Deixar resourcepack e shader sempre em `overrides/`** — funcionava, mas o
+  export do CurseForge os põe no manifest, e eram 9 dos 11 buracos do v0.23.

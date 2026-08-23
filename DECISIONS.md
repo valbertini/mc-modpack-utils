@@ -804,7 +804,7 @@ a cada 600 ms e abrir um zip por pack a cada consulta seria absurdo.
 
 Os bugs que escaparam nesta base foram quase todos do mesmo tipo: **um estado da
 interface que ninguém tinha olhado**. Em vez de caçar de novo à mão, o `app.js`
-passou a rodar num DOM de mentira (`node tools/check_ui.js`, sem dependências) e
+passou a rodar num DOM de mentira (`node tests/ui/check_ui.js`, sem dependências) e
 o teste **afirma**, para cada `status` de job, qual aviso e quais botões
 aparecem. São 29 verificações; provei que falham reintroduzindo o bug do card
 verde ao cancelar.
@@ -1072,9 +1072,9 @@ tinha seguido adiante:
 3. o aviso era **neutro**, e neutro num painel de trabalho lê-se como "estado
    normal". Passou a laranja, como os outros avisos.
 
-**Cancelar e excluir passaram a pedir dois cliques** (`armarBotao`, o mesmo do
-Encerrar). São as ações que jogam trabalho fora, e um clique errado custava uma
-análise inteira.
+**Cancelar passou a pedir dois cliques** (`armarBotao`, o mesmo do Encerrar):
+joga fora uma análise inteira que está acontecendo agora. Excluir também pedia,
+e deixou de pedir na v0.27.1 — ver §5z.
 
 ## 5m. A revisão esvazia quando o pack é gerado (v0.19)
 
@@ -1244,6 +1244,427 @@ Agora o flake8 é dependência de desenvolvimento e entrou na bateria; a varredu
 artesanal saiu. O ganho não é estético: na primeira execução ele achou um
 `W292` que a varredura não via, e as duas mutações de teste (`import` sem uso,
 variável sem uso) provam que ele pega o que ninguém pegava.
+
+---
+
+## 5u. O manifest passou a ter tudo que o export do CurseForge tem (v0.24)
+
+A comparação é o método: o mesmo modpack exportado pelo Modrinth (`.mrpack`),
+exportado pelo próprio CurseForge (`.zip`) e convertido por aqui. Os três lado a
+lado, arquivo por arquivo.
+
+**O placar antes.** O export do CurseForge tinha **54** entradas no manifest; o
+nosso, **43** — as 43 iguaizinhas, mesmo `projectID` e mesmo `fileID`. As 11 que
+faltavam eram 7 resourcepacks, 2 shaders e 2 mods que viajavam dentro do
+`overrides/` do mrpack. Todas elas viraram ~8 MB baixados para `overrides/` em
+vez de linhas no manifest.
+
+**As causas eram três, e nenhuma era o matcher.**
+
+1. **A busca só olhava a seção de mods.** `classId=6` estava fixo no cliente
+   HTTP. Procurar "Low Shield" ali devolve 150 mods e nenhum texture pack.
+   Agora a pasta do arquivo no índice (`mods/`, `resourcepacks/`,
+   `shaderpacks/`) escolhe o `classId` — e também a seção da URL do site, que
+   não é `mc-mods` para ninguém além dos mods.
+2. **`overrides/` era território proibido.** O `.mrpack` leva lá dentro o que o
+   Modrinth não hospeda, e boa parte disso existe no CurseForge (foi de lá que
+   veio). Agora esses arquivos entram como *candidatos*: se o CurseForge tiver
+   um arquivo com exatamente o mesmo nome, vão para o manifest e saem do
+   `overrides/`; senão continuam onde estavam, **sem virar conflito e sem
+   diagnóstico** — não achar é o estado normal deles.
+3. **Duas grafias e um empate.** `normalize_mod_name("3D Default …")` devolvia
+   `"default"`: o separador de CamelCase cortava entre o dígito e a letra
+   (`3 D`) e o filtro de tokens jogava os dois pedaços fora. E o slug daquele
+   texture pack é `minecraft-3d-default` no CurseForge contra `3d-default` no
+   Modrinth — a busca textual nunca devolve o projeto, mas o lookup por slug é
+   0-ou-1 e sai barato tentar o prefixo.
+
+**O placar depois: 55 × 54.** As 54 do export estão todas lá. A 55ª é um
+resourcepack que estava no `overrides/` do mrpack e que o CurseForge realmente
+publica — o export do launcher o deixou de fora porque o usuário o tinha
+adicionado à mão naquela instância, não porque ele não exista.
+
+### O nome do arquivo deixou de identificar uma release
+
+A regra de ouro do projeto (só casa com nome de arquivo idêntico) assume que o
+nome carrega a versão. Mod carrega; resourcepack não. `Low Shield.zip` é o nome
+de **40** arquivos do mesmo projeto, um por versão do Minecraft — e a v0.23
+pegaria qualquer um deles.
+
+`_pick_file` resolve o empate dentro do projeto: primeiro os que declaram a
+versão do Minecraft do pack, depois o mais recente. Não é um relaxamento da
+regra — o nome continua tendo de bater exatamente; é o desempate que faltava.
+
+### `.disabled` vira entrada opcional
+
+O export do CurseForge grava `required: false` exatamente nos dois mods que o
+mrpack tinha como `.jar.disabled`. Faz sentido: no launcher, mod desmarcado é
+instalado desligado. Marcar tudo como obrigatório religava, na importação, um
+mod que o autor do pack tinha desligado.
+
+Junto vieram `isLocked: false` em cada entrada e `overrides` antes de `files` —
+cosmética de formato, mas é de graça e some da lista de diferenças.
+
+### O que continua diferente, de propósito
+
+- **`image` / `profileImage/`.** O export do CurseForge aponta para o ícone da
+  instância. O `.mrpack` não tem ícone nenhum, e inventar um seria pior que não
+  ter.
+- **`version`.** Lá vem vazio; aqui vem o `versionId` do índice. É informação
+  real, e o launcher aceita.
+- **O `modlist.html` continua em ordem alfabética** e continua listando o que
+  ficou em `overrides/`. Ganhou o `(by Fulano)` do formato do CurseForge, mas
+  ele é decorativo — nada o lê na importação — e a lista serve mais para quem
+  abre o arquivo do que para a paridade.
+- **`datapacks/` ficou de fora.** Existe `classId` para eles (6945), mas eu não
+  tenho como conferir onde o launcher instala um datapack — e um datapack no
+  lugar errado não avisa, só não carrega. Um pack de teste com datapack resolve
+  isso; até lá, eles vão para `overrides/`, que funciona.
+
+### Por que os candidatos de `overrides/` são filtrados antes
+
+Só `mods/`, `resourcepacks/` e `shaderpacks/` na raiz, e só `.jar`/`.zip` (com
+ou sem `.disabled`). O `overrides/` de um pack de verdade tem 1.400 arquivos do
+Xaero e 320 de config; `Redstone Tweaks 2.5.3.zip.rpo` e `photon_v1.2a.zip.txt`
+são packs que o launcher desligou renomeando. Nada disso existe no CurseForge
+com esse nome, e cada tentativa custaria requisição.
+
+---
+
+## 5v. O loader entra na escolha do arquivo (v0.25)
+
+**O sintoma.** Um pack de Fabric importou o `cloth-config-26.2.155.jar` **de
+NeoForge**. Os dois arquivos existem no CurseForge, no mesmo projeto, com o
+**mesmo nome**; o que os separa é uma etiqueta dentro de `gameVersions`
+(`["NeoForge", "26.2"]` contra `["Fabric", "26.2"]`).
+
+**A causa.** O loader nunca tinha entrado na decisão. Enquanto o desempate entre
+homônimos era "o primeiro que a API devolver", qual dos dois vencia era sorte —
+e o desempate por data, que a v0.24 introduziu para os resourcepacks, trocou a
+sorte de lado. Medindo em quatro packs reais, **sete** arquivos estavam errados
+assim: Cloth Config, Bushier Flowers, Supplementaries Squared, Only Excavators,
+Powah!, Rare Ice e River Redux — todos jars de Forge dentro de packs de Fabric.
+
+**A regra.** `_loader_rank` dá quatro degraus a cada arquivo: declara o loader
+do pack (0), declara outro que o pack aceita (1 — o Quilt roda mod de Fabric),
+não declara nada (2 — arquivo antigo, ou resourcepack), declara só loader
+incompatível (3). O desempate passa a ser `(loader, versão do Minecraft, data)`.
+
+**O 3 não veta, e isso foi medido.** A primeira versão desta correção recusava o
+arquivo incompatível: se o CurseForge diz que é de NeoForge e o pack é Fabric,
+para `overrides/`. Parecia a decisão certa pela filosofia do projeto — até rodar
+no "Zombie Invade 100 Days", um pack **Forge** que carrega 6 mods de **Fabric**
+de propósito (é o que o Sinytra Connector permite). O CurseForge publica
+exatamente aqueles jars; recusá-los mandava seis matches certos para
+`overrides/`.
+
+Então o 3 é preferência com segunda chance:
+`_find_file_in_candidates` guarda o incompatível como **reserva** e continua
+procurando; se aparecer qualquer alternativa, ela ganha; se a busca terminar sem
+nada melhor, a reserva é usada. Isso custa a listagem completa de arquivos nos
+casos de loader trocado — e é justamente neles que ela vale a pena, porque o
+arquivo certo costuma estar fora dos `latestFiles`.
+
+Resultado nos quatro packs: 7 arquivos corrigidos, **nenhum match perdido**.
+
+---
+
+## 5w. Faxina das pastas, e o par de testes que não era para a interface (v0.25)
+
+Dois pedidos com a mesma origem: modpack ocupa disco. Um pack grande tem 400 MB,
+a conversão produz outro tanto, e depois de uma tarde testando a pasta vira um
+depósito de 20 GB.
+
+**A faxina de pasta inteira nasceu e morreu.** Era um botão **Limpar** por
+lado, apagando por padrão de nome (`*.mrpack` na entrada; `*.zip`, `*.mrpack`,
+`*-update.json`, `conversions/*.json` e o `.work/` na saída) — nunca varrendo a
+pasta, para o `.gitkeep` e o `README.md` do usuário sobreviverem. Tinha os dois
+cliques de sempre e 409 com trabalho aberto.
+
+Saiu na v0.27, a pedido: **os dois cliques não bastavam.** É um botão fixo, ao
+lado do caminho da pasta, que apaga *tudo* — e a distância entre "clicar sem
+querer" e "perder a tarde inteira" era um segundo de desatenção. O que faz o
+mesmo serviço sem esse risco é o **✕ de cada card**: mesma ação, mesma guarda,
+mas o estrago máximo é um arquivo, e você escolheu qual. A rota
+(`DELETE /api/storage/{alvo}`) e o módulo `storage.py` foram embora junto: rota
+perigosa que ninguém chama é só espera. Só o `WORK_DIRNAME` sobreviveu, para
+`constants.py` — o rascunho já era apagado sozinho no encerramento.
+
+**Apagar o registro passou a levar o `.zip` junto.** Antes ficava um arquivo
+órfão de centenas de MB que não aparecia em lista nenhuma — só o explorador de
+arquivos o encontrava.
+
+**O ✕ virou o mesmo em toda lista** (`botaoLixeira`/`ligarLixeiras`): entrada,
+conversões salvas e packs atualizados. As duas últimas antes só davam para
+apagar depois de selecionar, pelo botão da coluna de detalhes.
+
+**E apaga no primeiro clique** (v0.27.1). O armamento veio junto por herança do
+botão que apagava a pasta inteira, e com aquele botão fora ele passou a cobrar
+um clique a mais por um estrago que é um arquivo — que você já tinha de mirar,
+já que o ✕ só aparece no card sob o cursor. Cancelar e Encerrar continuam
+pedindo dois: lá o que se perde é trabalho em andamento, não um arquivo parado
+no disco.
+
+**O par de pastas de teste eu li errado.** "Um diretório extra para os inputs
+de testes e outputs de teste" virou um seletor `trabalho` × `testes` no topo da
+interface — troca de `input_dir`/`output_dir` da aplicação inteira, com rota,
+guarda de trabalho aberto e dois campos nas configurações. O pedido era outro:
+uma área para **o ferramental** rodar, para os testes automáticos e para quem
+está desenvolvendo mexer sem sujar as pastas de verdade.
+
+Saiu tudo da interface na v0.26.2. O que ficou é `Config.TEST_INPUT_DIR` /
+`TEST_OUTPUT_DIR` (`test_modpacks/`, configuráveis no `.env`), usadas pelo
+`tools/capture_job.py` e criadas por quem as usa. Nem a tela nem as
+configurações apontam para lá — e é exatamente por isso que dá para mexer ali
+sem risco.
+
+A lição: **"adicione uma pasta X" quase nunca quer dizer "adicione um seletor de
+pasta X"**. Uma pergunta teria evitado ~200 linhas.
+
+---
+
+## 5x. O `NaN` na tela, e o que ele revelou (v0.25.1)
+
+O card de confirmação do conversor mostrava **"NaN baixados para overrides/"**.
+A conta era `plan.downloads + plan.extra_files`, e o `extra_files` tinha sumido
+do payload na v0.24 — junto com a mudança que fez os não-mods também serem
+procurados no CurseForge.
+
+Só que o `app.js` **também** tinha sido corrigido no mesmo lote. O que estava
+velho era o navegador: `StaticFiles` sem `Cache-Control` deixa o Chrome
+reaproveitar o `app.js` da sessão anterior sem nem revalidar, e aí um front de
+ontem conversa com um servidor de hoje. `Cache-Control: no-cache` resolve — e
+`no-cache` não é "não guarde", é "guarde, mas confirme antes de usar": o ETag
+responde 304 e nada trafega de novo.
+
+**Duas falhas de rede de segurança apareceram juntas, e essas doem mais.**
+
+1. **O `apply-confirm` do conversor nunca era renderizado no `check_ui.js`.**
+   O do atualizador era; o do conversor, não — `state.confirming` ficava sempre
+   em `false`. Agora há um bloco só para ele: contagem, tamanho, nome do arquivo
+   gerado, os dois botões, e abrir/fechar.
+2. **Os "avisos de renderização" do DOM falso eram só impressos.** O harness já
+   detectava `undefined` e `[object Object]` no HTML, escrevia a lista na tela
+   — e terminava com "interface consistente em todos os estados" mesmo assim.
+   Agora cada aviso conta como falha, e `NaN` entrou na detecção.
+
+A mutação que prova o conjunto reintroduz exatamente a expressão original
+(`plan.downloads + plan.extra_files`) e a bateria reprova.
+
+### Segunda tentativa: o `no-cache` não bastou (v0.26)
+
+O `NaN` continuou na tela. Duas conclusões vieram daí, e a primeira é sobre
+método: **eu tinha diagnosticado sem reproduzir**. A correção seguinte começou
+por um script que pega o payload de um job de verdade (`/api/jobs/{id}`) e
+renderiza a interface inteira com ele num DOM de mentira, caçando `NaN` e
+`undefined` em cada escrita no HTML. O veredito foi imediato e desmentiu a
+pressa: com o payload real, o código em disco **não** produz `NaN`. Um fixture
+escrito à mão sempre tem o campo que o servidor esqueceu de mandar; o payload de
+verdade, não. O script ficou.
+
+A segunda conclusão é sobre o `no-cache`: ele resolve **do próximo boot em
+diante**. Um `app.js` que já está no cache do navegador foi guardado *sem*
+`Cache-Control`, e aí vale a heurística de frescor do próprio navegador — que
+pode não revalidar por horas. O cabeçalho não é retroativo.
+
+O que fecha a porta de vez é **a versão na URL**: `render_index()` serve a
+página com `/static/app.js?v=0.26.0`. Uma URL que muda a cada versão não tem
+cache antigo para reaproveitar, e o `?v=` é imune à heurística. Para o caso em
+que a **própria página** é a velha, a `<meta name="app-version">` é comparada
+com a versão que o `/api/state` devolve, e a diferença vira um aviso vermelho no
+cabeçalho pedindo `Ctrl`+`F5` — o único caso que exige uma ação do usuário, e
+agora ele é avisado em vez de ver um `NaN` sem explicação.
+
+Servir a página por um `HTMLResponse` montado na hora, em vez de um
+`FileResponse` do arquivo, é o preço: uma leitura de 20 KB por abertura de aba.
+
+### Terceira tentativa: era o `webbrowser.open` (v0.26.1)
+
+O `NaN` sobreviveu ao `?v=` também, e por um motivo que nenhuma dose de cabeçalho
+resolveria: **a aba nunca era recarregada**.
+
+O comando `web` faz `webbrowser.open("http://127.0.0.1:8000")`. Quando essa URL
+já está aberta, o navegador **foca a aba existente** em vez de navegar. A página
+é uma aplicação de uma tela só: ela não recarrega sozinha, e o `app.js` que ela
+carregou continua vivo na memória daquela aba. Reiniciar o servidor não muda
+nada disso — trocava o back-end debaixo de um front que continuava sendo o de
+antes.
+
+E a ironia: o aviso "esta página está desatualizada" mora no `app.js` novo.
+A página velha, que é justamente quem precisava avisar, não tinha o código do
+aviso. Rede de segurança que depende de já se ter a correção não é rede.
+
+A correção é uma linha: o comando abre `.../?v={versão}`. URL diferente é
+navegação de verdade, e a partir daí o `?v=` dos estáticos garante o resto.
+Junto veio a versão **à vista no cabeçalho** e na linha que o terminal imprime
+ao subir: com as duas visíveis, "estou rodando a versão nova?" deixa de ser
+adivinhação.
+
+**A lição de método, de novo.** Nas três tentativas eu tratei o sintoma que
+estava na minha frente (a expressão errada, depois o cache HTTP, depois a aba) em
+vez de perguntar primeiro *como esse código chega até aquela tela*. O
+`tests/ui/render_real.js` provou na segunda rodada que o disco estava certo; faltou
+seguir a pergunta até o fim na mesma hora.
+
+### De quebra, o card ficou útil
+
+Ele dizia três contagens. Agora diz também quantos arquivos **saem** do
+`overrides/` do mrpack para o manifest, **quantos MB** vão ser baixados — o
+índice do Modrinth já traz o `fileSize`, e é a diferença entre um clique
+instantâneo e um de dois minutos — e a divisão entre mods e o resto. O do
+atualizador ganhou a mesma dose: quantos já estão na versão mais recente, e
+quantos dos excluídos são mods.
+
+Na primeira versão o card também trazia a versão do Minecraft e do loader no
+cabeçalho, uma barra com a proporção que fica no manifest e o nome do `.zip` a
+gerar. Saíram todos na revisão (v0.26.2): o Minecraft e o loader já estão na
+lista de entrada e na aba de conflitos, o nome do arquivo aparece de novo assim
+que ele existe, e a barra era enfeite num painel cuja única função é você
+conferir números antes de confirmar. **O que sobreviveu foi o que não estava
+escrito em nenhum outro lugar da tela.**
+
+---
+
+## 5y. A conversão conferida contra o jogo instalado (v0.25.1)
+
+O teste que faltava não era um teste: era instalar os dois packs e comparar as
+pastas. O mesmo modpack, aberto no launcher do Modrinth e no do CurseForge:
+
+| pasta | arquivos | iguais |
+|---|---|---|
+| `mods/` | 48 × 48 | **48 byte a byte** |
+| `shaderpacks/` | 3 × 3 | **3 byte a byte** |
+| `resourcepacks/` | 11 × 11 | 10 byte a byte + 1 recompactado |
+| `config/` | 323 × 323 | 320 byte a byte + 3 de execução |
+
+O resourcepack "diferente" é o `xali's enchanted book`, justamente o que veio do
+`overrides/` do mrpack e que a v0.24 passou a promover para o manifest: os dois
+`.zip` têm **as mesmas 439 entradas com os mesmos CRCs** — muda só a compactação
+do contêiner, porque um veio do CDN do Modrinth e o outro do CurseForge. É o
+mesmo pack, reempacotado.
+
+Os três `config` diferentes são o carimbo de hora que o jogo escreve ao abrir
+(`iris.properties`, `indigo-renderer.properties`) e um id que o Jade acrescenta
+sozinho. As pastas que só existem do lado do Modrinth
+(`Distant_Horizons_server_data`, `XaeroWaypoints_BACKUP240807`, `datapacks/` e
+`syncmatics/` vazias) não estão no `overrides/` do mrpack de origem — são
+resultado de ter jogado naquele perfil.
+
+Ou seja: **nada do modpack se perdeu ou mudou na conversão.**
+
+---
+
+## 5z. O card de confirmação passou a falar em tamanho (v0.27)
+
+Ele dizia quatro contagens. Contagem responde "quantos", e a pergunta que sobra
+antes de clicar em *Continuar* é **"quanto"** — de disco, de download, de
+espera.
+
+Entrou **um** número: **`zip_mb`**, o tamanho estimado do arquivo que vai
+nascer — em ciano, porque num painel de contagens é o que se procura. E saiu
+**"1335 copiados do `overrides/` original"**: contagem de arquivos sobre os
+quais não há decisão nenhuma a tomar; 1335 só dizia "este pack tem muito
+config". O peso deles passou a aparecer onde importa, dentro do `zip_mb`.
+
+A primeira versão trouxe **três** tamanhos: o do manifest (com a nota *o
+launcher baixa*, porque não está no zip), o desconto do que saiu do
+`overrides/`, e o do download. Todos verdadeiros, e todos respondendo à mesma
+pergunta — *de onde vêm os bytes* —, que não é a que se faz com o dedo sobre o
+*Continuar*. Ficaram dois quilos de contexto em volta do único número que
+importa, e saíram na revisão seguinte (v0.27.1) junto com os campos que os
+alimentavam no `plan()`.
+
+**O tamanho dos overrides é o comprimido (`compress_size`), não o do arquivo
+aberto.** Medido no pack de teste: 33,7 MB crus contra **6,7 MB** dentro do zip
+— cinco vezes de diferença, porque `config/` é texto. Usar o tamanho cru daria
+uma estimativa 27 MB maior que o arquivo real. Para `.jar` e `.zip` — já
+comprimidos — os dois valores coincidem, que é por isso que o `fileSize` do
+índice do Modrinth serve bem para o que vai ser baixado.
+
+A conta é `overrides do mrpack − o que subiu para o manifest + o que vai ser
+baixado`, e o card mostra `≈`: a compressão do zip final não é exatamente a do
+mrpack, e prometer o número exato seria mentir por um dígito.
+
+---
+
+## 6a. Revisão do repositório (v0.27.1)
+
+Uma varredura inteira atrás de código sem dono, duplicado ou no lugar errado.
+Nada de comportamento mudou; o que mudou foi onde as coisas moram.
+
+**`web/jobs.py` fazia três coisas.** Ficou só com o ciclo de vida do trabalho em
+thread (696 → 540 linhas). Foram para o `web/payloads.py`, que é o módulo cujo
+assunto é exatamente esse, o que a tela consome:
+
+- `log_segments`/`log_plain` — traduzir a marcação do `rich` em trechos
+  coloridos. São funções puras sobre uma string; não tinham nada que estar
+  dentro do arquivo que cria threads;
+- `file_payload`/`update_payload`/`decided_exclusion` — o dicionário de uma
+  atualização.
+
+Elas perderam o `_` do começo ao atravessar a fronteira: nome privado usado de
+outro módulo é uma contradição que o leitor paga.
+
+**A política de rede estava escrita duas vezes.** `CurseForgeClient._get` e
+`ModrinthClient._request` tinham o mesmo laço de retentativa — mesmo backoff,
+mesmo `Retry-After`, mesmo teto — com diferenças só no fim. Viraram
+`services/http.py::fetch_json`, com dois parâmetros para o que realmente muda:
+quais status significam "não existe" (o CurseForge responde `400` para id
+inválido) e o que fazer quando as tentativas acabam. Retentativa duplicada é
+retentativa que diverge, e sempre no cliente que ninguém olhou.
+
+Além disso: **os dois laços não tinham teste nenhum**. É o código que decide se
+uma conversão de 400 mods sobrevive a um `429` no meio, e estava descoberto.
+Agora tem oito testes (`test_http_retries.py`), inclusive o backoff crescendo
+até o teto e o `Retry-After` absurdo sendo limitado.
+
+**O log da análise classificava por conta própria.** `_log_analysis` refazia, em
+cadeias de `if`, a mesma pergunta que `MatchResult.status` já responde — e que o
+relatório e o registro usam. Agora agrupa pelo `status`, e o balde `unknown`
+(sem match, sem erro e sem diagnóstico) deixou de cair no vazio. Três mutações
+provam os três baldes.
+
+**`test_web_api.py` tinha 52 testes e três assuntos.** Os seis que não sobem
+servidor nenhum — `finish`, `plan`, `_result_line` — foram para
+`tests/test_converter.py`. O `converter.py` é o módulo central do projeto e não
+tinha um arquivo de teste com o seu nome; agora tem.
+
+**Duas regras de CSS mortas** (`.nowrap`, `.detail-actions`) e um comentário que
+falava de um botão que não existe mais.
+
+**`tools/` guardava 128 asserções.** `check_ui.js`, `fake_dom.js` e
+`render_real.js` são teste: quebram a bateria quando algo está errado. Estavam
+onde ninguém procura teste. Foram para `tests/ui/`, e a pasta ficou com uma
+regra que dá para aplicar sem pensar: **`tests/` afirma, `tools/` faz**. O
+`capture_job.py` ficou onde estava por dois motivos — não afirma nada, e precisa
+de rede e da chave da API, o que o proíbe de morar num `tests/` cuja invariante
+é justamente não tocar a rede. O `check_all.py` também: ele é o runner, não o
+que é rodado.
+
+**O `.env.example` estava fora de sincronia**: faltavam `M2CF_HTTP_TIMEOUT` e
+`M2CF_HTTP_RETRIES` (que a tela de configurações edita) e sobrava a menção ao
+seletor de pastas que saiu na v0.26.2. Passou a listar exatamente o que o
+`Config` lê, na ordem em que a engrenagem mostra.
+
+### O que foi olhado e ficou como está
+
+- **`app.js` com 4381 linhas.** Dividir em módulos ES é tentador e está errado
+  aqui: o `tests/ui/fake_dom.js` roda o arquivo com `vm.runInContext`, que executa
+  *script*, não módulo. Separar exigiria `vm.SourceTextModule` (experimental) ou
+  um empacotador — e "sem build" é uma decisão de projeto, não um acidente. O
+  arquivo já é navegável por seções (`/* ==== */` por ferramenta). Fica assim
+  até a bateria de interface poder carregar módulos.
+- **Cada arquivo de teste tem o seu `INDEX` e a sua função que escreve o
+  `.mrpack`.** Parece duplicação; é locality. O que cada teste põe dentro do zip
+  *é* o assunto dele, e centralizar isso num `conftest.py` trocaria seis blocos
+  de cinco linhas por um parâmetro a mais em cada chamada.
+- **`router()` com 200 linhas** em `routes/jobs.py`. É o padrão de fábrica com
+  fecho: o contexto entra por closure, e os handlers de dentro têm dez linhas
+  cada. A contagem é do arquivo, não da complexidade.
+- **`progress.py` × `reporting.py`.** Os nomes são parecidos demais (um é o
+  protocolo `Reporter`, o outro é a tabela final), mas renomear mexeria em
+  importes de meia dúzia de arquivos para ganhar um nome melhor. Anotado, não
+  feito.
 
 ---
 

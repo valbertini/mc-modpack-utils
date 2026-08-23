@@ -1,13 +1,17 @@
 """Modelos internos do domínio.
 
-Estes modelos não conhecem Modrinth nem CurseForge: o parser converte o
-`.mrpack` para cá e o builder consome daqui.
+O parser converte o `.mrpack` para cá e o builder consome daqui — nenhum dos
+dois fala com o outro. O que o domínio sabe do CurseForge é só o vocabulário
+(que pastas têm seção equivalente lá, e o nome dela na URL); heurística nenhuma,
+que essa mora inteira em `services/matcher.py`.
 """
 
 from enum import Enum
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+from mrpack2curseforge.constants import CURSEFORGE_CLASSES, DEFAULT_SECTION
 
 
 class MinecraftInfo(BaseModel):
@@ -27,10 +31,32 @@ class PackFile(BaseModel):
     file_size: int | None = None
     # `env` do índice do Modrinth (client/server), preservado ao atualizar o pack
     env: dict[str, str] | None = None
+    # o arquivo já vinha dentro do `overrides/` do mrpack, não do índice
+    from_overrides: bool = False
+
+    @property
+    def folder(self) -> str:
+        """Primeira pasta do caminho: `mods`, `resourcepacks`, `shaderpacks`...
+
+        É ela que decide em que seção do CurseForge procurar o arquivo.
+        """
+
+        head, _, tail = self.file_path.partition("/")
+        return head if tail else ""
 
     @property
     def is_mod(self) -> bool:
-        return self.file_path.startswith("mods/")
+        return self.folder == "mods"
+
+    @property
+    def disabled(self) -> bool:
+        """Mod desligado no pack de origem (vira entrada opcional no manifest)."""
+        return self.file_name.endswith(".disabled")
+
+    @property
+    def override_path(self) -> str:
+        """Onde o arquivo fica quando vai para `overrides/`."""
+        return f"{self.folder}/{self.file_name}" if self.folder else self.file_name
 
     @property
     def clean_file_name(self) -> str:
@@ -93,6 +119,8 @@ class Diagnosis(BaseModel):
     project_slug: str | None = None
     closest_file_id: int | None = None
     closest_file_name: str | None = None
+    # seção do site onde o projeto vive (`mc-mods`, `texture-packs`, `shaders`)
+    section: str = DEFAULT_SECTION
     # qual arquivo do Modrinth produziu a maior similaridade
     matched_reference: str | None = None
     modrinth_files_checked: int = 0
@@ -101,7 +129,9 @@ class Diagnosis(BaseModel):
     def curseforge_url(self) -> str | None:
         if not self.project_slug:
             return None
-        return f"https://www.curseforge.com/minecraft/mc-mods/{self.project_slug}"
+        return (
+            f"https://www.curseforge.com/minecraft/{self.section}/{self.project_slug}"
+        )
 
 
 class MatchResult(BaseModel):
@@ -111,6 +141,7 @@ class MatchResult(BaseModel):
     file_id: int | None = None
     project_name: str | None = None
     project_slug: str | None = None
+    project_author: str | None = None
     modrinth: ModrinthProject | None = None
     queries_tried: list[str] = Field(default_factory=list)
     diagnosis: Diagnosis | None = None
@@ -206,6 +237,30 @@ class Modpack(BaseModel):
     mods: list[PackFile] = Field(default_factory=list)
     extra_files: list[PackFile] = Field(default_factory=list)
     override_paths: list[Path] = Field(default_factory=list)
+    # quanto `overrides/` ocupa dentro do mrpack (comprimido), para estimar o zip
+    override_bytes: int = 0
+    # arquivos que já vinham em `overrides/` e podem existir no CurseForge
+    override_candidates: list[PackFile] = Field(default_factory=list)
+
+    @property
+    def convertible(self) -> list[PackFile]:
+        """Arquivos que o matcher tenta encontrar no CurseForge.
+
+        Só as pastas com seção equivalente lá (mods, resourcepacks, shaderpacks):
+        um `config/x.json` do índice continua indo direto para `overrides/`.
+        """
+
+        todos = [*self.mods, *self.extra_files, *self.override_candidates]
+        return [f for f in todos if f.folder in CURSEFORGE_CLASSES]
+
+    @property
+    def plain_extras(self) -> list[PackFile]:
+        """Arquivos do índice que nem chegam a ser procurados no CurseForge.
+
+        `config/`, `datapacks/` e afins: vão direto para `overrides/`.
+        """
+
+        return [f for f in self.extra_files if f.folder not in CURSEFORGE_CLASSES]
 
     @property
     def loader_id(self) -> str:

@@ -57,9 +57,25 @@ def router(ctx: AppContext) -> APIRouter:
         return ctx.jobs.start_rebuild(record, source).snapshot()
 
     @api.delete("/api/records/{record_id}")
-    def remove_record(record_id: str) -> dict[str, bool]:
+    def remove_record(record_id: str) -> dict[str, Any]:
+        """Apaga o registro e o `.zip` que ele descreve.
+
+        Deixar o `.zip` para trás era um vazamento silencioso: sem o registro
+        ele não aparece em lista nenhuma, e num pack grande são centenas de MB
+        que só o explorador de arquivos encontrava.
+        """
+
+        record = load_record(ctx.output_dir, record_id)
+        liberado = 0
+
+        if record:
+            zip_path = ctx.output_dir / Path(record.get("zip_name") or "").name
+            if record.get("zip_name") and zip_path.is_file():
+                liberado = zip_path.stat().st_size
+                zip_path.unlink()
+
         if delete_record(ctx.output_dir, record_id):
-            return {"deleted": True}
+            return {"deleted": True, "freed_mb": round(liberado / (1024 * 1024), 1)}
 
         raise HTTPException(status_code=404, detail="Conversão não encontrada")
 

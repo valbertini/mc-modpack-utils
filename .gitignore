@@ -18,3 +18,13 @@ output_modpacks/*
 
 .cache/*
 !.cache/.gitkeep
+
+# captura do tools/capture_job.py (dados de um pack seu, não é fonte)
+tests/ui/job.json
+
+# a área do ferramental de teste (tools/capture_job.py cria quando usada)
+test_modpacks/
+
+# zips soltos para comparar exports (o do CurseForge, o do Modrinth, o nosso)
+zip/
+zips/

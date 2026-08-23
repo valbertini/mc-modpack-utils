@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import unquote
 
-from mrpack2curseforge.constants import MODRINTH_INDEX_FILE
+from mrpack2curseforge.constants import CURSEFORGE_CLASSES, MODRINTH_INDEX_FILE
 from mrpack2curseforge.domain import MinecraftInfo, Modpack, PackFile
 from mrpack2curseforge.exceptions import InvalidMrpackError
 from mrpack2curseforge.schemas.modrinth import ModrinthFile, ModrinthIndex
@@ -19,6 +19,11 @@ LOADER_KEYS = (
     ("quilt-loader", "quilt"),
     ("forge", "forge"),
 )
+
+# Extensões que valem uma consulta ao CurseForge. `.rpo`, `.txt` e companhia são
+# resourcepacks desligados pelo launcher: ninguém publica um arquivo com esse
+# nome, então procurar por eles só gastaria requisição.
+PACKABLE_SUFFIXES = (".jar", ".zip")
 
 
 class MrpackParser:
@@ -61,6 +66,11 @@ class MrpackParser:
         for pack_file in self._parse_files(index.files):
             (mods if pack_file.is_mod else extras).append(pack_file)
 
+        entradas = self._parse_overrides()
+        override_paths = [path for path, _ in entradas]
+        tamanhos = {path.as_posix(): tamanho for path, tamanho in entradas}
+        indexed = {f.override_path for f in mods + extras}
+
         return Modpack(
             name=index.name,
             version=index.versionId,
@@ -72,8 +82,51 @@ class MrpackParser:
             ),
             mods=mods,
             extra_files=extras,
-            override_paths=self._parse_overrides(),
+            override_paths=override_paths,
+            override_bytes=sum(tamanhos.values()),
+            override_candidates=self._override_candidates(
+                override_paths, indexed, tamanhos
+            ),
         )
+
+    # -------------------------------------------------- candidatos de overrides
+    @staticmethod
+    def _override_candidates(
+        paths: list[Path], indexed: set[str], sizes: dict[str, int]
+    ) -> list[PackFile]:
+        """Arquivos de `overrides/` que também podem existir no CurseForge.
+
+        O export do CurseForge lista no manifest até os mods que o Modrinth não
+        hospeda (e que por isso viajam dentro do `overrides/` do mrpack). Aqui
+        eles viram candidatos: se o CurseForge tiver um arquivo com exatamente o
+        mesmo nome, entram no manifest; senão ficam onde estavam, em silêncio.
+        """
+
+        candidates: list[PackFile] = []
+
+        for path in paths:
+            parts = path.parts
+            if len(parts) != 2 or parts[0] not in CURSEFORGE_CLASSES:
+                continue
+
+            name = parts[1]
+            if not name.removesuffix(".disabled").lower().endswith(PACKABLE_SUFFIXES):
+                continue
+
+            relative = f"{parts[0]}/{name}"
+            if relative in indexed:
+                continue
+
+            candidates.append(
+                PackFile(
+                    file_name=name,
+                    file_path=relative,
+                    from_overrides=True,
+                    file_size=sizes.get(relative),
+                )
+            )
+
+        return candidates
 
     # ------------------------------------------------------------- arquivos
     def _parse_files(self, files: list[ModrinthFile]) -> list[PackFile]:
@@ -111,19 +164,27 @@ class MrpackParser:
         )
 
     # ------------------------------------------------------------ overrides
-    def _parse_overrides(self) -> list[Path]:
-        """Lista os arquivos dentro de `overrides/` (e `client-overrides/`)."""
+    def _parse_overrides(self) -> list[tuple[Path, int]]:
+        """Os arquivos de `overrides/` (e `client-overrides/`) e o peso de cada um.
 
-        overrides: list[Path] = []
+        O tamanho é o **comprimido** (`compress_size`), e não o do arquivo
+        aberto: é ele que diz quanto aquele arquivo ocupa dentro de um `.zip`, e
+        é isso que a tela precisa para estimar o pacote final. Para `.jar` e
+        `.zip` — já comprimidos — os dois valores são praticamente o mesmo; para
+        os `config/*.json` a diferença é de várias vezes.
+        """
+
+        overrides: list[tuple[Path, int]] = []
 
         with zipfile.ZipFile(self.file) as z:
-            for name in z.namelist():
-                if name.endswith("/"):
+            for info in z.infolist():
+                if info.is_dir():
                     continue
 
                 for prefix in ("overrides/", "client-overrides/"):
-                    if name.startswith(prefix):
-                        overrides.append(Path(name[len(prefix):]))
+                    if info.filename.startswith(prefix):
+                        caminho = Path(info.filename[len(prefix):])
+                        overrides.append((caminho, info.compress_size))
                         break
 
         return overrides

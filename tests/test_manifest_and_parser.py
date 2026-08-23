@@ -108,12 +108,75 @@ def test_manifest_structure():
 
     assert manifest["manifestType"] == "minecraftModpack"
     assert manifest["minecraft"]["modLoaders"][0]["id"] == "fabric-0.16.0"
-    assert manifest["files"] == [{"projectID": 1, "fileID": 2, "required": True}]
+    assert manifest["files"] == [
+        {"projectID": 1, "fileID": 2, "required": True, "isLocked": False}
+    ]
     assert manifest["overrides"] == "overrides"
 
     modlist = CurseForgeManifestBuilder().build_modlist(results)
     assert "curseforge.com/minecraft/mc-mods/sodium" in modlist
     assert "x.jar (overrides)" in modlist
+
+
+def test_disabled_mods_become_optional_entries():
+    """`.jar.disabled` no mrpack = mod desmarcado no CurseForge.
+
+    É assim que o export do launcher grava: `required: false`, que ele reinstala
+    como `.jar.disabled`. Marcar `true` religaria um mod que estava desligado.
+    """
+
+    pack = Modpack(
+        name="Pack",
+        version="1",
+        minecraft=MinecraftInfo(version="1.21", loader="fabric", loader_version="1"),
+    )
+    results = [
+        MatchResult(
+            mod=PackFile(
+                file_name="chunky.jar.disabled", file_path="mods/chunky.jar.disabled"
+            ),
+            project_id=1,
+            file_id=2,
+        ),
+        MatchResult(
+            mod=PackFile(file_name="sodium.jar", file_path="mods/sodium.jar"),
+            project_id=3,
+            file_id=4,
+        ),
+    ]
+
+    files = CurseForgeManifestBuilder().build(pack, results)["files"]
+
+    assert [f["required"] for f in files] == [False, True]
+
+
+def test_modlist_uses_the_section_of_each_kind_and_names_the_author():
+    """Resourcepack não mora em `/mc-mods/`, e o CurseForge assina cada linha."""
+
+    results = [
+        MatchResult(
+            mod=PackFile(file_name="rp.zip", file_path="resourcepacks/rp.zip"),
+            project_id=1,
+            file_id=2,
+            project_name="Redstone Tweaks",
+            project_slug="redstone-tweaks",
+            project_author="Fulano",
+        ),
+        MatchResult(
+            mod=PackFile(file_name="sh.zip", file_path="shaderpacks/sh.zip"),
+            project_id=3,
+            file_id=4,
+            project_name="Photon",
+            project_slug="photon-shader",
+        ),
+    ]
+
+    modlist = CurseForgeManifestBuilder().build_modlist(results)
+
+    assert "curseforge.com/minecraft/texture-packs/redstone-tweaks" in modlist
+    assert "Redstone Tweaks (by Fulano)" in modlist
+    assert "curseforge.com/minecraft/shaders/photon-shader" in modlist
+    assert "mc-mods" not in modlist
 
 
 def test_safe_name_strips_invalid_characters():

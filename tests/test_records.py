@@ -255,25 +255,40 @@ def test_analysis_summary_groups_and_hides_the_successes(tmp_path: Path):
         )
     )
 
+    # e um quinto que nem chegou a ser procurado: a consulta falhou
+    quebrado = PackFile(file_name="e.jar", file_path="mods/e.jar")
+    outcome.results.append(MatchResult(mod=quebrado, error="timeout"))
+
+    # um sexto sem match e sem diagnóstico: some do log se o balde `unknown`
+    # for esquecido, e some justamente o que ninguém sabe explicar
+    outcome.results.append(
+        MatchResult(mod=PackFile(file_name="f.jar", file_path="mods/f.jar"))
+    )
+
     reporter = CapturingReporter()
     Converter(output_dir=tmp_path, reporter=reporter)._log_analysis(outcome.results)
 
     text = "\n".join(reporter.lines)
 
     # os que deram certo entram como contagem, não como lista
-    assert "2 mod(s) encontrados no CurseForge (não listados)" in text
+    assert "2 arquivo(s) encontrados no CurseForge (não listados)" in text
     assert "a.jar" not in text and "b.jar" not in text
 
     # os que exigem decisão aparecem, agrupados e com o motivo
-    assert "1 mod(s) sem essa versão no CurseForge" in text
+    assert "1 arquivo(s) sem essa versão no CurseForge" in text
     assert "c.jar" in text and "c-1.2.3.jar" in text
-    assert "1 mod(s) sem projeto no CurseForge" in text
-    assert "d.jar" in text
+    assert "2 arquivo(s) sem projeto no CurseForge" in text
+    assert "d.jar" in text and "f.jar" in text
+
+    # erro é o quarto grupo, e não se mistura com "sem projeto"
+    assert "1 arquivo(s) com erro" in text
+    assert "e.jar: timeout" in text
 
     # e o status final
     assert "2 no manifest" in text
     assert "1 sem a versão" in text
-    assert "1 sem projeto" in text
+    assert "2 sem projeto" in text
+    assert "1 com erro" in text
 
     # ordem: sucesso -> versão indisponível -> sem projeto -> resumo
     assert (

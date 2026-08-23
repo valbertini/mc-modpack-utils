@@ -7,6 +7,10 @@ Git Bash do Windows caem no prompt de aprovação e travam a sessão.
 O limite de 88 colunas e os importes sem uso saem do flake8 (`.flake8` na
 raiz); antes havia uma varredura de colunas escrita à mão aqui, que via só o
 comprimento das linhas.
+
+As asserções de interface moram em `tests/ui/` — são teste, não ferramenta.
+Aqui ficou só quem *roda* alguma coisa (esta bateria) ou *produz* alguma coisa
+(o `capture_job.py`, que precisa de rede e da chave da API).
 """
 
 import subprocess
@@ -43,7 +47,7 @@ def rodar(nome: str, comando: list[str]) -> None:
 
 rodar("pytest", [sys.executable, "-m", "pytest", "-q"])
 rodar("flake8", [sys.executable, "-m", "flake8", "src", "tests", "tools"])
-rodar("estados da interface", ["node", str(RAIZ / "tools/check_ui.js")])
+rodar("estados da interface", ["node", str(RAIZ / "tests/ui/check_ui.js")])
 rodar("sintaxe do app.js", ["node", "--check", str(APP_JS)])
 
 print()

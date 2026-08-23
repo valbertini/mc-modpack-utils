@@ -151,6 +151,20 @@ decisões daquela atualização e os botões de baixar, adicionar ao input e exc
 No canto superior direito ficam **Limpar cache**, **Encerrar** (fecha o servidor;
 pede dois cliques e cancela o que estiver rodando) e a **engrenagem**.
 
+### Espaço em disco
+
+Modpack ocupa disco: um pack grande tem 400 MB e a conversão produz outro tanto.
+Cada card das listas — o `.mrpack` da entrada, a conversão salva, o pack
+atualizado — tem um **✕** que aparece ao passar o mouse e apaga no primeiro
+clique. Ele recusa enquanto houver um trabalho aberto usando aquele arquivo.
+
+Apagar uma conversão salva leva o `.zip` junto: sem o registro ele não apareceria
+em lista nenhuma e só ocuparia disco.
+
+Não existe botão que esvazie uma pasta de uma vez. Existiu, e foi retirado: um
+clique errado ali levava horas de trabalho, e o ✕ faz o mesmo serviço com um
+arquivo por vez.
+
 ### Configurações
 
 A engrenagem abre um editor do seu `.env`: um campo por configuração, slider onde
@@ -243,27 +257,35 @@ input_modpacks/pack.mrpack
         │
         ▼
   leitura do modrinth.index.json          (mods, resourcepacks, hashes, URLs)
-        │
+        │                                   + o que já vem em overrides/
         ▼
   API do Modrinth (em lote)               SHA1 -> projeto -> slug + título real
         │
         ▼
-  API do CurseForge                       busca por slug, título, regex do arquivo
-        │
+  API do CurseForge                       busca na seção do arquivo (mod,
+        │                                 resourcepack ou shader)
         ▼
-  confirmação POR NOME DE ARQUIVO         só vale se o CurseForge tem o MESMO .jar
-        │
+  confirmação POR NOME DE ARQUIVO         só vale se o CurseForge tem o MESMO
+        │                                 arquivo
         ├── achou  ──► manifest.json (projectID + fileID)
         │
-        └── não achou ──► diagnóstico (versão indisponível? ou mod não existe lá?)
-                     └──► download do jar original ──► overrides/mods/
+        └── não achou ──► diagnóstico (versão indisponível? ou não existe lá?)
+                     └──► download do arquivo original ──► overrides/
         │
         ▼
 output_modpacks/pack-[convertido].zip
 ```
 
-Tudo que não é mod (resourcepacks, shaderpacks, datapacks) e todo o conteúdo de
-`overrides/` do pack original são copiados para o `overrides/` do zip final.
+Mod, resourcepack e shader são procurados no CurseForge, cada um na sua seção do
+site. O resto do índice (`config/`, `datapacks/`) e todo o conteúdo de
+`overrides/` do pack original são copiados para o `overrides/` do zip final —
+menos os arquivos de `overrides/mods`, `overrides/resourcepacks` e
+`overrides/shaderpacks` que também forem encontrados lá, que passam para o
+manifest (é o que o próprio export do CurseForge faz).
+
+O `manifest.json` sai no formato do export oficial, `isLocked` e tudo: mod que
+estava `.jar.disabled` no mrpack entra como opcional (`required: false`), que é
+como o launcher reinstala um mod desligado.
 
 Detalhes e justificativas de cada escolha estão em [`DECISIONS.md`](DECISIONS.md).
 
@@ -278,14 +300,23 @@ Para cada mod, nesta ordem, parando na primeira que confirmar:
 | 1 | `modrinth-slug` | lookups exatos por slug: o do Modrinth, o do título (`Essential Mod` → `essential-mod`) e os das variações de grafia |
 | 2 | `modrinth-title` | busca textual pelo título real do projeto |
 | 3 | `modrinth-variant` | outras grafias: `Extended AE` → `ExtendedAE`, `VitalityFix` → `Vitality Fix`, `extended_ae` |
-| 4 | `modrinth-loader` | nome + loader do pack (`Things` → `Things fabric`), que desempata buscas genéricas |
+| 4 | `modrinth-loader` | nome + loader do pack (`Things` → `Things fabric`), que desempata buscas genéricas — só para mods |
 | 5 | `filename-regex` | consulta derivada do nome do `.jar` (`ImmediatelyFast-Fabric-1.16.1.jar` → `immediately fast`) |
 | 6 | `filename-simple` | primeiro token relevante (último recurso) |
 
 **Um candidato só é aceito se existir nele um arquivo com exatamente o mesmo nome
-do `.jar` original** (ignorando maiúsculas/minúsculas e `.disabled`). Versão faz
-parte da comparação. Na dúvida, o mod vai para `overrides` — instalar o mod errado
-é pior do que não instalar pelo CurseForge.
+do arquivo original** (ignorando maiúsculas/minúsculas e `.disabled`). Versão faz
+parte da comparação. Na dúvida, o arquivo vai para `overrides` — instalar o mod
+errado é pior do que não instalar pelo CurseForge.
+
+Quando o mesmo nome aparece em vários arquivos do projeto, o desempate é
+`(loader, versão do Minecraft, data)`. Não é detalhe: o Cloth Config publica o
+jar de Fabric e o de NeoForge **com o mesmo nome**, e um resourcepack costuma
+publicar todas as releases como `Nome.zip`.
+
+Arquivo marcado com outro loader não é recusado — num pack Forge com Sinytra
+Connector os mods de Fabric estão lá de propósito. Ele fica de reserva e só é
+usado se a busca não achar nada melhor.
 
 ### Diagnóstico: "não existe" ou "versão indisponível"?
 
@@ -364,6 +395,32 @@ conversão completa (com downloads e `.zip` de 506 MB) em ~42s com cache quente.
 Os 4 restantes (Litematica, MiniHUD, Syncmatica, Axiom) **existem** no CurseForge,
 mas nenhum publicou lá exatamente a versão usada no pack — por isso vão para
 `overrides` com o arquivo original do Modrinth.
+
+### Comparado com o jogo instalado
+
+O mesmo modpack aberto nos dois launchers, pasta a pasta:
+
+| pasta | arquivos | idênticos |
+|---|---|---|
+| `mods/` | 48 × 48 | **48 byte a byte** |
+| `shaderpacks/` | 3 × 3 | **3 byte a byte** |
+| `resourcepacks/` | 11 × 11 | 10 byte a byte + 1 recompactado (mesmas 439 entradas, mesmos CRCs) |
+| `config/` | 323 × 323 | 320 byte a byte + 3 com o carimbo de hora do primeiro boot |
+
+### Comparado com o export do próprio CurseForge
+
+O mesmo modpack ("Otimizado 1.21.11": 48 mods, 8 resourcepacks, 2 shaders)
+exportado pelo launcher do CurseForge e convertido aqui:
+
+| | export do CurseForge | conversor |
+|---|---|---|
+| entradas no `manifest.json` | 54 | **55** |
+| das 54 deles, presentes aqui | — | **54** |
+| arquivos deixados em `overrides/` | 9 | 8 |
+
+A 55ª entrada é um resourcepack que o `.mrpack` levava dentro de `overrides/` e
+que o CurseForge de fato publica. Os 5 mods que sobram em `overrides/` são
+exatamente os 5 que o export oficial também deixou lá.
 
 ---
 

@@ -13,12 +13,13 @@ com as suas pastas.
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
 
 from contextlib import asynccontextmanager
 
+from mrpack2curseforge import __version__
 from mrpack2curseforge.config import Config
 from mrpack2curseforge.web.context import AppContext
 from mrpack2curseforge.web.routes import (
@@ -31,6 +32,30 @@ from mrpack2curseforge.web.routes import (
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def render_index() -> str:
+    """A página com a versão carimbada nas URLs dos estáticos.
+
+    Sem isso o navegador podia ficar com o `app.js` de uma versão anterior
+    conversando com um servidor já atualizado — e um campo renomeado no payload
+    virava `NaN` na tela. `?v=` muda a URL a cada versão, então não há cache
+    antigo para reaproveitar; a `<meta>` deixa a própria página saber de que
+    versão ela é, para avisar se **ela** for a velha.
+    """
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    html = html.replace(
+        "/static/app.js", f"/static/app.js?v={__version__}"
+    ).replace("/static/style.css", f"/static/style.css?v={__version__}")
+
+    return html.replace(
+        "<head>",
+        f'<head>\n<meta name="app-version" content="{__version__}">',
+        1,
+    )
+
 
 # A aplicação é servida inteiramente da máquina local: HTML, CSS e JS saem daqui,
 # nunca de um CDN (a página abre mesmo sem internet). Imagens externas são
@@ -66,12 +91,22 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
 
+        caminho = scope.get("path", "")
+
         async def send_with_headers(message):
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 headers["Content-Security-Policy"] = CSP
                 headers["Referrer-Policy"] = "no-referrer"
                 headers["X-Content-Type-Options"] = "nosniff"
+
+                # `no-cache` **não** é "não guarde": é "guarde, mas confirme
+                # antes de usar". O ETag do StaticFiles responde 304 e nada
+                # trafega de novo. Sem isto o navegador reaproveitava o app.js
+                # da versão anterior contra um servidor já atualizado — e um
+                # campo renomeado no payload virava `NaN` na tela.
+                if caminho.startswith("/static/") or caminho == "/":
+                    headers["Cache-Control"] = "no-cache"
 
             await send(message)
 
@@ -105,8 +140,8 @@ def create_app(
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+    def index() -> HTMLResponse:
+        return HTMLResponse(render_index())
 
     @app.get("/favicon.ico")
     def favicon() -> FileResponse:

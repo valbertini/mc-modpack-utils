@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from mrpack2curseforge.config import Config
+from mrpack2curseforge.constants import WORK_DIRNAME
 from mrpack2curseforge.services.cache import SimpleCache
 from mrpack2curseforge.services.curseforge import CurseForgeClient
 from mrpack2curseforge.services.modrinth import ModrinthClient
@@ -66,7 +67,7 @@ class AppContext:
 
         self.close_curseforge()
 
-        work = self.output_dir / ".work"
+        work = self.output_dir / WORK_DIRNAME
         if work.exists():
             shutil.rmtree(work, ignore_errors=True)
 

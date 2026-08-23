@@ -174,6 +174,32 @@ main { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.5rem; }
 /* caminhos longos não podem furar o card */
 .path { word-break: break-all; overflow-wrap: anywhere; }
 
+/* o aviso de página velha mora no cabeçalho: some da tela é o que não pode */
+/* a versão da página à vista: é o que responde "estou na nova?" */
+.version { color: var(--muted); opacity: .7; font-size: .78em; }
+
+#stale-app { margin: .4rem 0 0; }
+
+#stale-app kbd {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 .25rem; font-size: .8em; font-family: inherit;
+}
+
+/* o caminho da pasta, numa linha que não cresce: a coluna já não pode rolar */
+.path-row { gap: .5rem; margin-bottom: .4rem; }
+.path-row .path { margin: 0; flex: 1; min-width: 0; }
+
+/* o ✕ de apagar convive com o `›`, que é quem diz "clique para ver" */
+.pack-actions { display: flex; align-items: center; gap: .1rem; }
+
+/* o ✕ de apagar um pack: só aparece no card sob o cursor */
+.pack .pack-del {
+  background: none; border: none; cursor: pointer; padding: 0 .3rem;
+  color: var(--muted); font-size: .9rem; line-height: 1; visibility: hidden;
+}
+.pack:hover .pack-del { visibility: visible; }
+.pack .pack-del:hover { color: var(--red); }
+
 /* ----------------------------------------------------------------- cards */
 .card {
   background: var(--card);
@@ -539,7 +565,6 @@ main { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.5rem; }
 .pack.selected { border-color: var(--accent); }
 .card.conversion { border-color: #2f3a4d; }
 .warn-text { color: var(--yellow); }
-.detail-actions { margin-top: .9rem; }
 .job-source { color: var(--muted); font-size: .82rem; margin: .1rem 0 .7rem; }
 .start-row { margin-top: .9rem; }
 .job-actions { margin-top: .9rem; }
@@ -577,6 +602,8 @@ main { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.5rem; }
 .confirm h3 { margin-bottom: .2rem; font-size: .84rem; }
 .confirm ul { margin: .15rem 0 .5rem; padding-left: .95rem; font-size: .79rem; }
 .confirm li { margin: .08rem 0; line-height: 1.3; }
+/* o único tamanho do painel — destacado porque é o que se procura ali */
+.confirm strong.tamanho { color: var(--cyan); }
 
 /* -------------------------------------------------------------- detalhes */
 /* quem limita a altura é o `.col-card`; aqui só o espaçamento interno */

@@ -15,7 +15,10 @@
       <span class="logo">⛏</span>
       <div>
         <h1>mrpack2curseforge</h1>
-        <p class="sub">Modrinth <span class="arrow">→</span> CurseForge</p>
+        <p class="sub">
+          Modrinth <span class="arrow">→</span> CurseForge
+          <span class="version" id="app-version"></span>
+        </p>
       </div>
     </div>
 
@@ -70,6 +73,12 @@
     </div>
   </header>
 
+  <div class="notice bad hidden" id="stale-app">
+    Esta página é da versão <strong id="stale-page">?</strong> e o servidor já
+    está na <strong id="stale-server">?</strong>.
+    Recarregue com <kbd>Ctrl</kbd>+<kbd>F5</kbd> para pegar a versão nova.
+  </div>
+
   <nav class="tabs" id="tabs">
     <button class="tab active" data-tab="convert" data-tool="converter">Converter</button>
     <button class="tab" data-tab="conflicts" data-tool="converter">
@@ -102,7 +111,9 @@
           Procura cada mod no CurseForge e monta um <span class="mono">.zip</span>
           pronto para importar lá.
         </p>
-        <p class="hint path" id="input-dir" title=""></p>
+        <div class="row space path-row">
+          <p class="hint path" id="input-dir" title=""></p>
+        </div>
 
         <div id="pack-list" class="pack-list scroller"></div>
 
@@ -130,7 +141,9 @@
           Guardamos só o que foi decidido; o <span class="mono">.zip</span> é
           gerado na hora, quando você pedir.
         </p>
-        <p class="hint path" id="output-dir" title=""></p>
+        <div class="row space path-row">
+          <p class="hint path" id="output-dir" title=""></p>
+        </div>
 
         <div id="record-list" class="pack-list scroller"></div>
 
@@ -234,7 +247,9 @@
           Troca os mods pela versão mais recente do Minecraft que você escolher e
           devolve um <span class="mono">.mrpack</span> novo.
         </p>
-        <p class="hint path" id="update-input-dir" title=""></p>
+        <div class="row space path-row">
+          <p class="hint path" id="update-input-dir" title=""></p>
+        </div>
 
         <div id="update-pack-list" class="pack-list scroller"></div>
 
@@ -267,7 +282,9 @@
           O <span class="mono">.mrpack</span> fica salvo junto com o registro do
           que foi decidido.
         </p>
-        <p class="hint path" id="update-output-dir" title=""></p>
+        <div class="row space path-row">
+          <p class="hint path" id="update-output-dir" title=""></p>
+        </div>
 
         <div id="update-output-list" class="pack-list scroller"></div>
 

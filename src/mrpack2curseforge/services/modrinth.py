@@ -20,7 +20,9 @@ import httpx
 from mrpack2curseforge.config import Config
 from mrpack2curseforge.constants import MODRINTH_API, USER_AGENT
 from mrpack2curseforge.domain import ModrinthProject, PackFile
+from mrpack2curseforge.exceptions import ApiError
 from mrpack2curseforge.services.cache import SimpleCache
+from mrpack2curseforge.services.http import VAZIO, fetch_json
 
 CDN_PROJECT_RE = re.compile(r"cdn\.modrinth\.com/data/([A-Za-z0-9]+)/", re.IGNORECASE)
 
@@ -79,27 +81,22 @@ class ModrinthClient:
             time.sleep(max(espera, 0.05))
 
     def _request(self, method: str, url: str, **kwargs) -> Any:
+        """Uma requisição na API. Devolve `None` para "não deu".
+
+        Aqui desistir e não existir dão no mesmo: nenhuma chamada do Modrinth é
+        obrigatória para a conversão seguir — sem o nome do projeto o matcher
+        cai para as estratégias que só olham o nome do arquivo, e a atualização
+        marca o mod como não identificado.
+        """
+
         self._wait_for_slot()
 
-        for attempt in range(Config.HTTP_RETRIES):
-            try:
-                response = self.client.request(method, url, **kwargs)
+        try:
+            data = fetch_json(self.client, method, url, label="Modrinth ", **kwargs)
+        except ApiError:
+            return None
 
-                if response.status_code == 429:
-                    wait = float(response.headers.get("Retry-After", 2 ** attempt))
-                    time.sleep(min(wait, 30))
-                    continue
-
-                if response.status_code == 404:
-                    return None
-
-                response.raise_for_status()
-                return response.json()
-
-            except (httpx.HTTPError, ValueError):
-                time.sleep(min(2 ** attempt, 10))
-
-        return None
+        return None if data is VAZIO else data
 
     # ------------------------------------------------------------- pipeline
     def resolve_projects(self, mods: list[PackFile]) -> dict[str, ModrinthProject]:

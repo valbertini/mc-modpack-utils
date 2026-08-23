@@ -1,25 +1,22 @@
 """Testes da API web (sem rede: nenhum teste dispara conversão real)."""
 
 import json
-import threading
 import zipfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from mrpack2curseforge.converter import ConversionOutcome, Converter, Resolution
+from mrpack2curseforge.converter import ConversionOutcome
 from mrpack2curseforge.domain import (
     Diagnosis,
     MatchResult,
-    MatchStrategy,
     MinecraftInfo,
     MissingReason,
     Modpack,
     ModrinthProject,
     PackFile,
 )
-from mrpack2curseforge.exceptions import ConversionCancelled
 from mrpack2curseforge.reporting import build_report
 from mrpack2curseforge.web.jobs import Job
 from mrpack2curseforge.web.server import create_app
@@ -607,9 +604,10 @@ def test_unresolved_shrinks_as_conflicts_are_resolved(client, fake_job):
     assert snapshot["plan"] == {
         "manifest": 1,
         "manual": 1,
+        "from_overrides": 0,
         "downloads": 0,
-        "extra_files": 0,
-        "override_files": 0,
+        "download_mods": 0,
+        "zip_mb": 0.0,
     }
 
 
@@ -703,17 +701,6 @@ def test_cancel_while_paused_finishes_the_job(client, fake_job):
     assert client.post(f"/api/jobs/{fake_job.id}/apply").status_code == 409
 
 
-def test_cancelled_converter_raises_before_working(tmp_path: Path):
-    event = threading.Event()
-    event.set()
-
-    converter = Converter(output_dir=tmp_path, cancel_event=event)
-
-    assert converter.cancelled
-    with pytest.raises(ConversionCancelled):
-        converter._check_cancel()
-
-
 def test_apply_requires_analysis(client, tmp_path: Path):
     from mrpack2curseforge.web.jobs import Job
 
@@ -755,7 +742,8 @@ def test_records_endpoints(client, tmp_path: Path):
     assert failed.status_code == 400
     assert "não está mais em input_modpacks" in failed.json()["detail"]
 
-    assert client.delete("/api/records/meu-pack").json() == {"deleted": True}
+    apagado = client.delete("/api/records/meu-pack").json()
+    assert apagado == {"deleted": True, "freed_mb": 0.0}
     assert client.get("/api/records").json()["records"] == []
     assert client.get("/api/records/meu-pack").status_code == 404
 
@@ -770,161 +758,72 @@ def test_inspect_lists_mod_files_and_extras(client, tmp_path: Path):
     assert "size_mb" in data
 
 
-# --------------------------------------------------------------- finish
-def test_finish_applies_manual_choice(tmp_path: Path, monkeypatch):
-    """A escolha manual entra no manifest e o mod sai de overrides."""
+# ------------------------------------------------------------- versão da página
+def test_the_page_stamps_the_version_on_every_local_asset(client):
+    """Sem o `?v=`, o navegador reaproveita o `app.js` da versão anterior.
 
-    mod = PackFile(file_name="litematica.jar", file_path="mods/litematica.jar")
-    pack = Modpack(
-        name="P",
-        version="1",
-        minecraft=MinecraftInfo(version="1.21", loader="fabric", loader_version="0.1"),
-        mods=[mod],
-    )
-    result = MatchResult(mod=mod)
-    report = build_report(pack, [result], tmp_path / "p.mrpack")
+    Um front antigo contra um servidor novo é como um campo renomeado no payload
+    vira `NaN` na tela — e o usuário não tem como desconfiar.
+    """
 
-    outcome = ConversionOutcome(
-        source=write_mrpack(tmp_path / "p.mrpack"),
-        pack=pack,
-        results=[result],
-        report=report,
-        output=tmp_path / "p.zip",
-        record_path=tmp_path / "conversions" / "p.json",
-    )
-    outcome.output.write_bytes(b"x")
+    from mrpack2curseforge import __version__
 
-    converter = Converter(output_dir=tmp_path)
-    monkeypatch.setattr(
-        converter, "_assemble", lambda *a, **k: (outcome.output, None, 0)
-    )
+    html = client.get("/").text
 
-    updated = converter.finish(
-        outcome,
-        {
-            "litematica.jar": Resolution(
-                project_id=1, file_id=2, project_name="Litematica"
-            )
-        },
-    )
-
-    assert updated.results[0].matched
-    assert updated.results[0].strategy is MatchStrategy.MANUAL
-    assert updated.report.matched == 1
-    assert updated.report.overrides == 0
-    assert updated.packaged
-
-    # desfazendo, o mod volta para overrides
-    reverted = converter.finish(updated, {})
-    assert not reverted.results[0].matched
-    assert reverted.report.matched == 0
+    assert f'<meta name="app-version" content="{__version__}">' in html
+    assert f"/static/app.js?v={__version__}" in html
+    assert f"/static/style.css?v={__version__}" in html
+    # nenhuma sobrou sem carimbo
+    assert '"/static/app.js"' not in html
+    assert '"/static/style.css"' not in html
 
 
-def test_plan_describes_what_finish_will_do(tmp_path: Path):
-    mods = [
-        PackFile(file_name="a.jar", file_path="mods/a.jar"),
-        PackFile(file_name="b.jar", file_path="mods/b.jar"),
-    ]
-    pack = Modpack(
-        name="P",
-        version="1",
-        minecraft=MinecraftInfo(version="1.21", loader="fabric", loader_version="0.1"),
-        mods=mods,
-        extra_files=[PackFile(file_name="rp.zip", file_path="resourcepacks/rp.zip")],
-        override_paths=[Path("config/a.json")],
-    )
+def test_the_state_reports_the_version_so_the_page_can_compare(client):
+    from mrpack2curseforge import __version__
 
-    results = [
-        MatchResult(mod=mods[0], project_id=1, file_id=2),
-        MatchResult(mod=mods[1]),
-    ]
-
-    outcome = ConversionOutcome(
-        source=tmp_path / "p.mrpack",
-        pack=pack,
-        results=results,
-        report=build_report(pack, results, tmp_path / "p.mrpack"),
-        output=tmp_path / "p.zip",
-        record_path=tmp_path / "conversions" / "p.json",
-    )
-
-    assert outcome.plan() == {
-        "manifest": 1,
-        "manual": 0,
-        "downloads": 1,
-        "extra_files": 1,
-        "override_files": 1,
-    }
+    assert client.get("/api/state").json()["version"] == __version__
 
 
-def test_drop_resolved_overrides_keeps_files_from_the_mrpack(tmp_path: Path):
-    """Jars que já vinham no overrides/ do mrpack não podem ser apagados."""
+def test_the_page_and_the_static_files_are_not_cached(client):
+    """`no-cache` é "guarde, mas revalide" — o ETag ainda evita o tráfego."""
 
-    overrides = tmp_path / "overrides"
-    (overrides / "mods").mkdir(parents=True)
-
-    do_pack = overrides / "mods" / "do-pack.jar"
-    do_matcher = overrides / "mods" / "resolvido.jar"
-    do_pack.write_text("a")
-    do_matcher.write_text("b")
-
-    pack = Modpack(
-        name="P",
-        version="1",
-        minecraft=MinecraftInfo(version="1.21", loader="fabric", loader_version="0.1"),
-        override_paths=[Path("mods/do-pack.jar")],
-    )
-
-    results = [
-        MatchResult(
-            mod=PackFile(file_name="do-pack.jar", file_path="mods/do-pack.jar"),
-            project_id=1,
-            file_id=2,
-        ),
-        MatchResult(
-            mod=PackFile(file_name="resolvido.jar", file_path="mods/resolvido.jar"),
-            project_id=3,
-            file_id=4,
-        ),
-    ]
-
-    Converter._drop_resolved_overrides(pack, results, overrides)
-
-    assert do_pack.exists()
-    assert not do_matcher.exists()
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+    # as rotas de API ficam de fora: nada muda no download do .zip
+    assert "cache-control" not in client.get("/api/state").headers
 
 
 # ------------------------------------------------------------ log do terminal
 def test_log_formatting():
-    from mrpack2curseforge.web.jobs import _plain
+    from mrpack2curseforge.web.payloads import log_plain
 
     # o nível vem da PRIMEIRA tag: a linha de resumo tem verde, amarelo e vermelho
-    assert _plain(
+    assert log_plain(
         "[bold]Resumo:[/bold] [green]45 ok[/green] · [red]0 sem projeto[/red]"
     ) == ("Resumo: 45 ok · 0 sem projeto", "info")
 
-    assert _plain("[green]++[/green] achado")[1] == "ok"
-    assert _plain("[yellow]--[/yellow] overrides")[1] == "warn"
-    assert _plain("[red]--[/red] erro")[1] == "error"
+    assert log_plain("[green]++[/green] achado")[1] == "ok"
+    assert log_plain("[yellow]--[/yellow] overrides")[1] == "warn"
+    assert log_plain("[red]--[/red] erro")[1] == "error"
 
     # a indentação do resumo é preservada
-    assert _plain("     [yellow]--[/yellow] litematica.jar")[0] == (
+    assert log_plain("     [yellow]--[/yellow] litematica.jar")[0] == (
         "     -- litematica.jar"
     )
 
     # colchetes que fazem parte do nome do arquivo não são comidos
-    assert _plain("[red]--[/red] mod[1.20].jar")[0] == "-- mod[1.20].jar"
+    assert log_plain("[red]--[/red] mod[1.20].jar")[0] == "-- mod[1.20].jar"
 
     # linha vazia é espaçador, não é descartada
-    assert _plain("") == ("", "info")
+    assert log_plain("") == ("", "info")
 
 
 def test_summary_line_is_coloured_number_by_number():
     """No terminal da interface cada número do resumo sai na sua cor."""
 
-    from mrpack2curseforge.web.jobs import _segments
+    from mrpack2curseforge.web.payloads import log_segments
 
-    parts = _segments(
+    parts = log_segments(
         "[bold]Resumo:[/bold] [green]45[/green] no manifest · "
         "[yellow]4[/yellow] sem a versão · [red]0[/red] sem projeto"
     )
@@ -934,39 +833,6 @@ def test_summary_line_is_coloured_number_by_number():
     assert coloured == [("45", "ok"), ("4", "warn"), ("0", "error")]
     assert "".join(p["text"] for p in parts) == (
         "Resumo: 45 no manifest · 4 sem a versão · 0 sem projeto"
-    )
-
-
-def test_streamed_line_per_mod():
-    """Durante a busca cada mod gera uma linha, no estilo do terraform."""
-
-    from mrpack2curseforge.converter import Converter
-
-    mod = PackFile(file_name="sodium.jar", file_path="mods/sodium.jar")
-
-    achado = MatchResult(mod=mod, project_id=1, file_id=2, project_name="Sodium")
-    assert Converter._result_line(achado) == "[green]++[/green] sodium.jar -> Sodium"
-
-    sem_versao = MatchResult(
-        mod=mod,
-        diagnosis=Diagnosis(
-            reason=MissingReason.VERSION_UNAVAILABLE, project_name="Sodium"
-        ),
-    )
-    assert "[yellow]--[/yellow]" in Converter._result_line(sem_versao)
-    assert "sem essa versão" in Converter._result_line(sem_versao)
-
-    sem_projeto = MatchResult(
-        mod=mod, diagnosis=Diagnosis(reason=MissingReason.NOT_ON_CURSEFORGE)
-    )
-    assert Converter._result_line(sem_projeto) == (
-        "[red]--[/red] sodium.jar -> sem projeto no CurseForge"
-    )
-
-    com_erro = MatchResult(mod=mod, error="timeout")
-    assert (
-        Converter._result_line(com_erro)
-        == "[red]--[/red] sodium.jar: erro (timeout)"
     )
 
 
@@ -1052,3 +918,29 @@ def test_apagar_a_chave_pela_api_preserva_o_resto(
     valores = settings.read()
     assert "CURSEFORGE_API_KEY" not in valores
     assert valores["M2CF_WORKERS"] == "11"
+
+
+# ------------------------------------------------------- abertura do navegador
+def test_the_web_command_opens_a_versioned_url(monkeypatch):
+    """`webbrowser.open` com a URL de sempre **foca** a aba já aberta.
+
+    No Windows é o que acontece, e aí reiniciar o app devolvia a interface da
+    versão anterior — ainda viva na memória daquela aba, com o `app.js` de
+    antes. URL diferente força uma navegação de verdade.
+    """
+
+    import threading
+    import webbrowser
+
+    from mrpack2curseforge import __version__, cli
+
+    aberturas: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", aberturas.append)
+    # o Timer roda o alvo na hora, sem thread nem espera
+    monkeypatch.setattr(threading.Timer, "start", lambda self: self.function())
+    monkeypatch.setattr("mrpack2curseforge.web.server.serve", lambda **kw: None)
+
+    cli.web(host="127.0.0.1", port=8000, input_dir=None, output_dir=None,
+            open_browser=True)
+
+    assert aberturas == [f"http://127.0.0.1:8000/?v={__version__}"]

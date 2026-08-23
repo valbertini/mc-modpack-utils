@@ -203,12 +203,86 @@ function mostrarLado(grupo, lado) {
   });
 }
 
-document.querySelectorAll(".switch").forEach((nav) => {
+document.querySelectorAll(".switch[data-switch]").forEach((nav) => {
   nav.addEventListener("click", (event) => {
     const botao = event.target.closest("button");
     if (botao) mostrarLado(nav.dataset.switch, botao.dataset.side);
   });
 });
+
+/* -------------------------------------------------- apagar um item da lista
+   O ✕ é o mesmo em toda lista, e apaga no primeiro clique: ele só aparece no
+   card sob o cursor, some do caminho de quem não está mirando nele, e o que
+   leva é um arquivo escolhido — não a pasta inteira, que é o que justificava
+   os dois cliques enquanto existia um botão para isso.
+   -------------------------------------------------------------------------- */
+function botaoLixeira(id, titulo) {
+  return `<button class="pack-del" data-del="${esc(id)}"
+                  title="${titulo}">✕</button>`;
+}
+
+function ligarLixeiras(list, acao) {
+  list.querySelectorAll("[data-del]").forEach((el) => {
+    el.addEventListener("click", (event) => {
+      // sem isto o mesmo clique também seleciona o card
+      event.stopPropagation();
+      acao(el.dataset.del);
+    });
+  });
+}
+
+async function apagarPack(nome) {
+  try {
+    const data = await api(`/api/packs/${encodeURIComponent(nome)}`, {
+      method: "DELETE",
+    });
+    toast(`${nome} apagado · ${data.freed_mb} MB liberados`, "ok");
+
+    if (state.selectedPack === nome) state.selectedPack = null;
+    if (state.updatePack === nome) state.updatePack = null;
+
+    await loadState();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+/** Apagar a conversão salva leva junto o `.zip` que ela descreve. */
+async function apagarRegistro(id) {
+  try {
+    const data = await api(`/api/records/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    toast(`Registro excluído · ${data.freed_mb} MB liberados`, "ok");
+
+    delete state.detailCache["record:" + id];
+    if (isSelected("record", id)) {
+      state.selection = null;
+      renderDetail();
+    }
+
+    await loadState();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function apagarUpdate(nome) {
+  try {
+    await api(`/api/updates/${encodeURIComponent(nome)}`, { method: "DELETE" });
+    toast("Pack atualizado excluído", "ok");
+
+    delete state.detailCache["update:" + nome];
+    if (state.selectedUpdate === nome) {
+      state.selectedUpdate = null;
+      renderUpdateDetail(state.updateJob && state.updateJob.update);
+    }
+
+    await loadSavedUpdates();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
 
 /* ------------------------------------------------------------ estado geral */
 async function loadState() {
@@ -223,6 +297,8 @@ async function loadState() {
     setText($(id), caminho);
     $(id).title = caminho;
   }
+
+  conferirVersao(data.version);
 
   // o cache cresce a cada conversão: relido junto com o resto do estado
   loadCacheSize();
@@ -323,13 +399,17 @@ async function loadSavedUpdates() {
                 : '<span class="warn-text">arquivo ausente</span>'}
             </div>
           </div>
-          <span class="hint">›</span>
+          <div class="pack-actions">
+            ${botaoLixeira(item.name, "apagar este .mrpack atualizado")}
+            <span class="hint">›</span>
+          </div>
         </div>`;
     }).join(""));
 
     list.querySelectorAll("[data-update-file]").forEach((el) => {
       el.addEventListener("click", () => showSavedUpdate(el.dataset.updateFile));
     });
+    ligarLixeiras(list, apagarUpdate);
   } catch (_) {
     setHTML(list, `<p class="hint">não foi possível listar</p>`);
   }
@@ -596,13 +676,17 @@ function renderPacks(packs) {
         <div class="meta">${packMeta(pack)}</div>
         <div class="meta">${pack.size_mb} MB · ${fmtDate(pack.modified)}</div>
       </div>
-      <span class="hint">›</span>
+      <div class="pack-actions">
+        ${botaoLixeira(pack.name, "apagar este .mrpack")}
+        <span class="hint">›</span>
+      </div>
     </div>
   `).join("");
 
   list.querySelectorAll(".pack").forEach((el) => {
     el.addEventListener("click", () => selectPack(el.dataset.pack));
   });
+  ligarLixeiras(list, apagarPack);
 }
 
 function renderRecords(records) {
@@ -636,7 +720,10 @@ function renderRecords(records) {
             ${record.source_available ? "" : ' · <span class="warn-text">origem ausente</span>'}
           </div>
         </div>
-        <span class="hint">›</span>
+        <div class="pack-actions">
+          ${botaoLixeira(record.id, "apagar o registro e o .zip")}
+          <span class="hint">›</span>
+        </div>
       </div>
     `;
   }).join("");
@@ -644,6 +731,7 @@ function renderRecords(records) {
   list.querySelectorAll("[data-record]").forEach((el) => {
     el.addEventListener("click", () => selectDetail("record", el.dataset.record));
   });
+  ligarLixeiras(list, apagarRegistro);
 }
 
 function isSelected(kind, id) {
@@ -999,8 +1087,8 @@ function renderNotice(job) {
     if (unresolved > 0) {
       setHTML(notice, `
         <strong>Pausado antes dos downloads.</strong>
-        ${unresolved} mod(s) sem escolha seriam baixados do Modrinth para
-        <span class="mono">overrides/mods</span>.
+        ${unresolved} arquivo(s) sem escolha seriam baixados do Modrinth para
+        <span class="mono">overrides/</span>.
         Resolva o que quiser na aba <strong>Conflitos</strong>, salve, e volte aqui
         para <strong>Aplicar mudanças</strong> — seguir sem resolver também funciona.
         ${aviso}
@@ -1106,21 +1194,39 @@ function renderConfirm(job) {
 
   // linhas curtas de propósito: o popup tem de caber sem rolar
   const plan = job.plan;
-  const baixar = plan.downloads + plan.extra_files;
+  const outros = plan.downloads - plan.download_mods;
 
   const lines = [
     `<li><strong>${plan.manifest}</strong> no manifest${
-      plan.manual ? ` (${plan.manual} escolhidos por você)` : ""
+      plan.manual ? ` <span class="hint">(${plan.manual} escolhidos por você)</span>` : ""
     }</li>`,
-    `<li><strong>${baixar}</strong> baixados para <span class="mono">overrides/</span></li>`,
   ];
 
-  if (plan.override_files) {
+  // sai do overrides/ e vira entrada do manifest: é o pack encolhendo
+  if (plan.from_overrides) {
     lines.push(
-      `<li><strong>${plan.override_files}</strong> copiados do
-       <span class="mono">overrides/</span> original</li>`
+      `<li><strong>${plan.from_overrides}</strong> ${
+         plan.from_overrides === 1 ? "sai" : "saem"
+       } do <span class="mono">overrides/</span> do mrpack</li>`
     );
   }
+
+  lines.push(
+    `<li><strong>${plan.downloads}</strong> baixados para
+     <span class="mono">overrides/</span>${
+       plan.downloads && outros
+         ? ` <span class="hint">(${plan.download_mods} mod(s) · ${outros} outro(s))</span>`
+         : ""
+     }</li>`
+  );
+
+  // o único tamanho do painel, e o único número que o usuário leva para o
+  // disco. Os outros três (manifest, desconto, download) diziam de onde vêm
+  // os bytes — pergunta que ninguém faz na hora de clicar em Continuar
+  lines.push(
+    `<li><span class="mono">.zip</span> final
+     <strong class="tamanho">≈ ${fmtTamanho(plan.zip_mb)}</strong></li>`
+  );
 
   const changed = setHTML(box, `
     <h3>O que vai acontecer</h3>
@@ -1283,7 +1389,7 @@ function renderConflicts() {
 
   $("conflicts-hint").innerHTML =
     `${total - unresolved} de ${total} resolvidos. O que ficar sem escolha vai ` +
-    `para <span class="mono">overrides/mods</span> — o modpack funciona igual.` +
+    `para <span class="mono">overrides/</span> — o modpack funciona igual.` +
     (unsaved
       ? ` <span class="unsaved-inline">${unsaved} alteração(ões) não salva(s)</span>`
       : "");
@@ -1314,6 +1420,13 @@ function renderConflicts() {
 
   if (setHTML(container, markup)) bindConflictEvents();
   autoLoadOpenConflict();
+}
+
+/** Etiqueta do tipo — só quando não é mod, que é o caso normal. */
+function kindTag(conflict) {
+  const rotulos = { resourcepacks: "resourcepack", shaderpacks: "shader" };
+  const rotulo = rotulos[conflict.kind];
+  return rotulo ? `<span class="tag">${rotulo}</span>` : "";
 }
 
 function renderConflictCard(conflict) {
@@ -1377,6 +1490,7 @@ function renderConflictCard(conflict) {
       <div class="conflict-head" data-toggle="${esc(conflict.file_name)}">
         <div class="conflict-title">
           <span class="conflict-file mono">${esc(conflict.file_name)}</span>
+          ${kindTag(conflict)}
           ${similarity}
           ${chosen}
         </div>
@@ -1498,6 +1612,41 @@ const LOADERS = ["fabric", "forge", "neoforge", "quilt"];
 const RELEASE_ORDER = { release: 0, beta: 1, alpha: 2 };
 
 /** Minecraft e loader que o modpack exige. */
+/**
+ * A página é da mesma versão do servidor?
+ *
+ * O `?v=` na URL do `app.js` garante que uma página nova nunca pega um script
+ * velho. O que ele não resolve é a própria página estar velha no cache do
+ * navegador — e aí um front de ontem conversa com um servidor de hoje, que foi
+ * exatamente como um `NaN` chegou à tela. Isto aqui é o aviso desse caso.
+ */
+function conferirVersao(doServidor) {
+  const meta = document.querySelector('meta[name="app-version"]');
+  const daPagina = meta ? meta.getAttribute("content") : null;
+  const box = $("stale-app");
+
+  // a da página, não a do servidor: é ela que diz que código está rodando aqui
+  setText($("app-version"), daPagina ? `v${daPagina}` : "");
+
+  // sem `meta` a página é anterior a este aviso; sem versão do servidor, idem
+  const velha = Boolean(daPagina && doServidor && daPagina !== doServidor);
+
+  if (velha) {
+    setText($("stale-page"), daPagina);
+    setText($("stale-server"), doServidor);
+  }
+
+  box.classList.toggle("hidden", !velha);
+}
+
+/** MB para uma etiqueta curta: acima de mil, GB. */
+function fmtTamanho(mb) {
+  const valor = Number(mb) || 0;
+  return valor >= 1024
+    ? `${(valor / 1024).toFixed(1).replace(".", ",")} GB`
+    : `${valor.toFixed(valor < 10 ? 1 : 0).replace(".", ",")} MB`;
+}
+
 function packTarget() {
   const report = state.job && state.job.report;
   if (!report) return { mc: null, loader: null };
@@ -1607,7 +1756,12 @@ async function runSearch(fileName, force) {
   panel.innerHTML = `<p class="hint">buscando no CurseForge…</p>`;
 
   try {
-    const data = await api(`/api/curseforge/search?q=${encodeURIComponent(query)}`);
+    const conflict = state.conflicts.find((c) => c.file_name === fileName);
+    const kind = (conflict && conflict.kind) || "mods";
+
+    const data = await api(
+      `/api/curseforge/search?q=${encodeURIComponent(query)}&kind=${encodeURIComponent(kind)}`
+    );
     state.searchCache[fileName] = { query, results: data.results };
 
     if (!data.results.length) {
@@ -2153,21 +2307,7 @@ function renderUpdateOutputActions(dados) {
   }
 
   $("update-output-actions").querySelector("[data-saved-delete]")
-    .addEventListener("click", async () => {
-      if (!armarBotao("del-update", "Excluir mesmo?")) {
-        return renderUpdateOutputActions(dados);
-      }
-
-      try {
-        await api(`/api/updates/${encodeURIComponent(nome)}`, { method: "DELETE" });
-        state.selectedUpdate = null;
-        renderUpdateDetail(state.updateJob && state.updateJob.update);
-        await loadSavedUpdates();
-        toast("Pack atualizado excluído", "ok");
-      } catch (error) {
-        toast(error.message, "error");
-      }
-    });
+    .addEventListener("click", () => apagarUpdate(nome));
 }
 
 function renderRecordActions() {
@@ -2218,22 +2358,7 @@ function renderRecordActions() {
     });
 
   $("record-actions").querySelector("[data-delete]")
-    .addEventListener("click", async () => {
-      if (!armarBotao("del-record", "Excluir mesmo?")) return renderRecordActions();
-
-      try {
-        await api(`/api/records/${encodeURIComponent(registro.id)}`, {
-          method: "DELETE",
-        });
-        delete state.detailCache["record:" + registro.id];
-        state.selection = null;
-        renderDetail();
-        await loadState();
-        toast("Registro excluído", "ok");
-      } catch (error) {
-        toast(error.message, "error");
-      }
-    });
+    .addEventListener("click", () => apagarRegistro(registro.id));
 }
 
 /* =========================================================================
@@ -2269,10 +2394,14 @@ function renderUpdatePacks(packs) {
         <div class="meta">${packMeta(pack)}</div>
         <div class="meta">${pack.size_mb} MB · ${fmtDate(pack.modified)}</div>
       </div>
-      <span class="hint">›</span>
+      <div class="pack-actions">
+        ${botaoLixeira(pack.name, "apagar este .mrpack")}
+        <span class="hint">›</span>
+      </div>
     </div>
   `).join(""));
 
+  ligarLixeiras(list, apagarPack);
   list.querySelectorAll("[data-update-pack]").forEach((el) => {
     el.addEventListener("click", () => {
       state.updatePack = el.dataset.updatePack;
@@ -3684,6 +3813,9 @@ function updatePlan() {
   let trocam = 0;
   let manuais = 0;
   let fora = 0;
+  // ficar de fora é a decisão que quebra o jogo: vale dizer *o que* fica
+  let foraMods = 0;
+  let jaNaMaisNova = 0;
 
   allUpdateFiles().forEach((file) => {
     const escolha = pickFor(file);
@@ -3691,12 +3823,14 @@ function updatePlan() {
 
     if (!dentro) {
       fora += 1;
+      if (file.is_mod) foraMods += 1;
       return;
     }
 
     entram.push(file);
     if (escolha) manuais += 1;
     else if (file.new_file_name && !keepFor(file)) trocam += 1;
+    else if (file.status === "unchanged") jaNaMaisNova += 1;
   });
 
   return {
@@ -3704,6 +3838,8 @@ function updatePlan() {
     trocam,
     manuais,
     fora,
+    foraMods,
+    jaNaMaisNova,
     mantidos: allUpdateFiles().filter((f) => keepFor(f)).length,
     downgrade: update.downgrade,
     loader: update.loader_changed
@@ -3736,14 +3872,23 @@ function renderUpdateConfirm(job) {
      ${plano.manuais ? `, <strong>${plano.manuais}</strong> escolhidos por você` : ""}</li>`,
   ];
 
+  if (plano.jaNaMaisNova) {
+    linhas.push(
+      `<li><strong>${plano.jaNaMaisNova}</strong> já estão na versão mais recente</li>`
+    );
+  }
+
   if (plano.mantidos) {
     linhas.push(`<li><strong>${plano.mantidos}</strong> ficam na versão atual</li>`);
   }
 
   if (plano.fora) {
+    const outros = plano.fora - plano.foraMods;
     linhas.push(
       `<li><strong>${plano.fora}</strong> ficam <strong>de fora</strong>: sem versão
-       para o alvo</li>`
+       para o alvo <span class="hint">(${plano.foraMods} mod(s)${
+         outros ? ` · ${outros} outro(s)` : ""
+       })</span></li>`
     );
   }
 

@@ -11,6 +11,7 @@ import json
 import shutil
 import threading
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,7 @@ from pathlib import Path
 from mrpack2curseforge.builders.curseforge_manifest import CurseForgeManifestBuilder
 from mrpack2curseforge.builders.package import build_zip, safe_name
 from mrpack2curseforge.config import Config
+from mrpack2curseforge.constants import WORK_DIRNAME
 from mrpack2curseforge.domain import (
     MatchResult,
     MatchStrategy,
@@ -53,6 +55,16 @@ class Resolution:
     file_name: str | None = None
 
 
+def _bytes(files: "list[PackFile]") -> int:
+    """Soma tamanhos ignorando o que o índice não declarou."""
+
+    return sum(f.file_size or 0 for f in files)
+
+
+def _mb(size: int) -> float:
+    return round(size / (1024 * 1024), 1)
+
+
 @dataclass
 class ConversionOutcome:
     """Tudo que a conversão produziu (permite reempacotar depois)."""
@@ -74,38 +86,54 @@ class ConversionOutcome:
         """Mods que ainda não entraram no manifest."""
         return [result for result in self.results if not result.matched]
 
-    def plan(
-        self, resolutions: dict[str, "Resolution"] | None = None
-    ) -> dict[str, int]:
+    def plan(self, resolutions: dict[str, "Resolution"] | None = None) -> dict:
         """Resumo do que o `finish()` vai fazer (mostrado antes de confirmar).
 
         `resolutions` são as escolhas ainda **não aplicadas**: sem elas o plano
         mostraria downloads que já não vão acontecer.
+
+        `zip_mb` é o tamanho estimado do arquivo que vai nascer: o que fica em
+        `overrides/` (peso comprimido, do zip de origem) menos o que subiu para
+        o manifest, mais o que vai ser baixado para lá (`fileSize` do índice do
+        Modrinth). É o único número que o usuário leva para o disco, e por isso
+        o único tamanho do painel de confirmação.
         """
 
         resolutions = resolutions or {}
-        manifest = manual = downloads = 0
+        manual = 0
+        no_manifest: list[PackFile] = []
+        pendentes: list[PackFile] = []
 
         for result in self.results:
-            resolved = result.mod.file_name in resolutions
-
-            if resolved:
-                manifest += 1
+            if result.mod.file_name in resolutions:
                 manual += 1
+                no_manifest.append(result.mod)
             elif result.matched and result.strategy is MatchStrategy.MANUAL:
                 # escolha manual desfeita: volta para overrides
-                downloads += 1
+                pendentes.append(result.mod)
             elif result.matched:
-                manifest += 1
+                no_manifest.append(result.mod)
             else:
-                downloads += 1
+                pendentes.append(result.mod)
+
+        # o que veio de overrides/ nunca é baixado: ele já está no disco.
+        # Junto vai o que nem chega a ser procurado lá (config, datapack…)
+        baixar = [f for f in pendentes if not f.from_overrides]
+        baixar += self.pack.plain_extras
+
+        # quem sai do overrides/ para o manifest deixa de pesar no zip
+        vindos = [f for f in no_manifest if f.from_overrides]
+        poupado = _bytes(vindos)
+        baixado = _bytes(baixar)
 
         return {
-            "manifest": manifest,
+            "manifest": len(no_manifest),
             "manual": manual,
-            "downloads": downloads,
-            "extra_files": len(self.pack.extra_files),
-            "override_files": len(self.pack.override_paths),
+            # quantos saem do overrides/ do mrpack direto para o manifest
+            "from_overrides": len(vindos),
+            "downloads": len(baixar),
+            "download_mods": sum(1 for f in baixar if f.is_mod),
+            "zip_mb": _mb(max(self.pack.override_bytes - poupado, 0) + baixado),
         }
 
 
@@ -163,14 +191,18 @@ class Converter:
         ) as curseforge:
             self._check_cancel()
 
+            indexed = [*pack.mods, *pack.extra_files]
+
             reporter.stage("Consultando o Modrinth para descobrir os nomes dos mods")
-            modrinth_map = modrinth.resolve_projects(pack.mods)
+            # os candidatos de overrides/ ficam de fora: não têm hash no índice
+            # (é por não estarem no Modrinth que viajam dentro do overrides/)
+            modrinth_map = modrinth.resolve_projects(indexed)
             reporter.info(
-                f"[dim]{len(modrinth_map)}/{len(pack.mods)} mods identificados "
+                f"[dim]{len(modrinth_map)}/{len(indexed)} arquivos identificados "
                 f"no Modrinth[/dim]"
             )
 
-            results = self._match_mods(pack, modrinth_map, curseforge, modrinth)
+            results = self._match_files(pack, modrinth_map, curseforge, modrinth)
 
         cache.flush()
 
@@ -324,36 +356,22 @@ class Converter:
 
         reporter = self.reporter
 
-        def sort_key(result: MatchResult) -> str:
-            return result.mod.file_name.lower()
+        # a classificação é a do `MatchResult.status`, a mesma que o relatório e
+        # o registro usam: repetida aqui, ela divergiria na primeira mudança
+        grupos: dict[str, list[MatchResult]] = defaultdict(list)
+        for result in sorted(results, key=lambda r: r.mod.file_name.lower()):
+            grupos[result.status].append(result)
 
-        ok = sorted((r for r in results if r.matched), key=sort_key)
-        failed = sorted((r for r in results if r.error), key=sort_key)
+        ok = grupos["curseforge"]
+        failed = grupos["failed"]
+        version_unavailable = grupos[MissingReason.VERSION_UNAVAILABLE.value]
+        # sem projeto e sem diagnóstico caem no mesmo balde: não há o que dizer
+        missing = grupos[MissingReason.NOT_ON_CURSEFORGE.value] + grupos[
+            MissingReason.UNKNOWN.value
+        ]
 
-        version_unavailable = sorted(
-            (
-                r
-                for r in results
-                if not r.matched
-                and not r.error
-                and r.diagnosis
-                and r.diagnosis.reason is MissingReason.VERSION_UNAVAILABLE
-            ),
-            key=sort_key,
-        )
-        missing = sorted(
-            (
-                r
-                for r in results
-                if not r.matched
-                and not r.error
-                and (
-                    not r.diagnosis
-                    or r.diagnosis.reason is not MissingReason.VERSION_UNAVAILABLE
-                )
-            ),
-            key=sort_key,
-        )
+        # os que estavam em overrides/ e agora têm projeto: o pack encolhe
+        promoted = [r for r in ok if r.mod.from_overrides]
 
         reporter.info("")
         reporter.info("[bold]Resultado da análise[/bold]")
@@ -361,15 +379,21 @@ class Converter:
 
         if ok:
             reporter.info(
-                f"[green]++[/green] {len(ok)} mod(s) encontrados no CurseForge "
+                f"[green]++[/green] {len(ok)} arquivo(s) encontrados no CurseForge "
                 f"(não listados)"
+            )
+
+        if promoted:
+            reporter.info(
+                f"[green]++[/green] {len(promoted)} deles vinham do "
+                f"[cyan]overrides/[/cyan] do mrpack e saem de lá"
             )
 
         if version_unavailable:
             reporter.info("")
             reporter.info(
-                f"[yellow]--[/yellow] {len(version_unavailable)} mod(s) sem essa "
-                f"versão no CurseForge (vão para overrides):"
+                f"[yellow]--[/yellow] {len(version_unavailable)} arquivo(s) sem "
+                f"essa versão no CurseForge (vão para overrides):"
             )
             for result in version_unavailable:
                 diagnosis = result.diagnosis
@@ -392,8 +416,8 @@ class Converter:
         if missing:
             reporter.info("")
             reporter.info(
-                f"[red]--[/red] {len(missing)} mod(s) sem projeto no CurseForge "
-                f"(vão para overrides):"
+                f"[red]--[/red] {len(missing)} arquivo(s) sem projeto no "
+                f"CurseForge (vão para overrides):"
             )
             for result in missing:
                 reporter.info(f"     [red]--[/red] {result.mod.file_name}")
@@ -405,7 +429,7 @@ class Converter:
 
         if failed:
             reporter.info("")
-            reporter.info(f"[red]--[/red] {len(failed)} mod(s) com erro:")
+            reporter.info(f"[red]--[/red] {len(failed)} arquivo(s) com erro:")
             for result in failed:
                 reporter.info(
                     f"     [red]--[/red] {result.mod.file_name}: {result.error}"
@@ -446,18 +470,19 @@ class Converter:
                 result.strategy = MatchStrategy.UNMATCHED
 
     # ------------------------------------------------------------- matching
-    def _match_mods(
+    def _match_files(
         self,
         pack: Modpack,
         modrinth_map: dict,
         curseforge: CurseForgeClient,
         modrinth: ModrinthClient,
     ) -> list[MatchResult]:
-        order = {mod.file_path: index for index, mod in enumerate(pack.mods)}
+        alvos = pack.convertible
+        order = {mod.file_path: index for index, mod in enumerate(alvos)}
         results: list[MatchResult] = []
         reporter = self.reporter
 
-        reporter.stage("Procurando no CurseForge", total=len(pack.mods))
+        reporter.stage("Procurando no CurseForge", total=len(alvos))
 
         matcher = CurseForgeMatcher(
             client=curseforge,
@@ -468,8 +493,16 @@ class Converter:
 
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
             futures = {
-                pool.submit(matcher.match, mod, modrinth_map.get(mod.file_path)): mod
-                for mod in pack.mods
+                pool.submit(
+                    matcher.match,
+                    mod,
+                    modrinth_map.get(mod.file_path),
+                    # não achar um arquivo que já está em overrides/ é o normal
+                    # dele: não vira conflito, então o diagnóstico só gastaria
+                    # requisição
+                    not mod.from_overrides,
+                ): mod
+                for mod in alvos
             }
 
             for future in as_completed(futures):
@@ -482,6 +515,11 @@ class Converter:
                     result = future.result()
                 except Exception as exc:  # noqa: BLE001 - falha isolada por mod
                     result = MatchResult(mod=mod, error=str(exc))
+
+                if mod.from_overrides and not result.matched:
+                    # segue exatamente onde estava, sem aparecer em lugar nenhum
+                    reporter.advance()
+                    continue
 
                 results.append(result)
                 # sai daqui (thread única) e não do matcher: assim a ordem das
@@ -504,7 +542,7 @@ class Converter:
         reporter = self.reporter
         base_name = base_name or self._base_name(pack)
 
-        work_dir = self.output_dir / ".work" / base_name
+        work_dir = self.output_dir / WORK_DIRNAME / base_name
 
         # `reuse` mantém os arquivos já baixados (reempacotar fica quase instantâneo)
         if work_dir.exists() and not reuse:
@@ -521,22 +559,23 @@ class Converter:
         if extracted:
             reporter.info(f"[dim]{extracted} arquivos copiados de overrides/[/dim]")
 
-        self._drop_resolved_overrides(pack, results, overrides_dir)
+        self._drop_resolved_overrides(results, overrides_dir)
 
-        mods_pending = [
-            (result.mod, overrides_dir / "mods" / result.mod.file_name)
+        # o que veio do índice e não entrou no manifest é baixado; o que já
+        # estava em overrides/ (e portanto não tem URL) continua onde está
+        pending = [
+            result.mod
             for result in results
-            if not result.matched
+            if not result.matched and not result.mod.from_overrides
         ]
-        extras_pending = [
-            (extra, overrides_dir / extra.file_path) for extra in pack.extra_files
-        ]
+        # mais o que nem chega a ser procurado no CurseForge (config, datapack…)
+        pending += pack.plain_extras
 
         failures = self._download_all(
-            mods_pending + extras_pending,
+            [(item, overrides_dir / item.override_path) for item in pending],
             results,
-            len(mods_pending),
-            len(extras_pending),
+            sum(1 for item in pending if item.is_mod),
+            sum(1 for item in pending if not item.is_mod),
         )
 
         self._check_cancel()
@@ -568,27 +607,21 @@ class Converter:
 
     @staticmethod
     def _drop_resolved_overrides(
-        pack: Modpack, results: list[MatchResult], overrides_dir: Path
+        results: list[MatchResult], overrides_dir: Path
     ) -> None:
-        """Remove de `overrides/mods` os jars de mods que agora entram no manifest.
+        """Tira de `overrides/` tudo que agora entra no manifest.
 
-        Arquivos que já vinham dentro do `overrides/` do mrpack original são
-        preservados — eles não são responsabilidade do matcher.
+        Vale também para o que já vinha dentro do `overrides/` do mrpack: uma vez
+        no manifest, deixar o arquivo aqui instalaria o mesmo mod duas vezes.
         """
-
-        from_mrpack = {path.as_posix() for path in pack.override_paths}
 
         for result in results:
             if not result.matched:
                 continue
 
-            relative = f"mods/{result.mod.file_name}"
-            if relative in from_mrpack:
-                continue
-
-            jar = overrides_dir / "mods" / result.mod.file_name
-            if jar.exists():
-                jar.unlink()
+            arquivo = overrides_dir / result.mod.override_path
+            if arquivo.exists():
+                arquivo.unlink()
 
     # ------------------------------------------------------------- downloads
     def _download_all(

@@ -46,6 +46,17 @@ class Config:
 
     INPUT_DIR: Path = _env_path("M2CF_INPUT_DIR", PROJECT_ROOT / "input_modpacks")
     OUTPUT_DIR: Path = _env_path("M2CF_OUTPUT_DIR", PROJECT_ROOT / "output_modpacks")
+
+    # Área do ferramental de teste (`tools/capture_job.py` e afins). Não é
+    # configuração de uso: a interface nunca aponta para cá, e é justamente por
+    # isso que dá para mexer aqui sem risco de sujar as pastas de verdade. As
+    # pastas são criadas por quem as usa, não na importação.
+    TEST_INPUT_DIR: Path = _env_path(
+        "M2CF_TEST_INPUT_DIR", PROJECT_ROOT / "test_modpacks" / "input"
+    )
+    TEST_OUTPUT_DIR: Path = _env_path(
+        "M2CF_TEST_OUTPUT_DIR", PROJECT_ROOT / "test_modpacks" / "output"
+    )
     CACHE_PATH: Path = _env_path(
         "M2CF_CACHE", PROJECT_ROOT / ".cache" / "curseforge.sqlite3"
     )

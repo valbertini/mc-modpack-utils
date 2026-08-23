@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from mrpack2curseforge.builders.mrpack import LOADER_DEPENDENCY
 from mrpack2curseforge.config import Config
+from mrpack2curseforge.constants import CURSEFORGE_CLASS_MODS, CURSEFORGE_CLASSES
 from mrpack2curseforge.exceptions import ApiError
 from mrpack2curseforge.services.cache import SimpleCache
 from mrpack2curseforge.services.loaders import loader_versions
@@ -77,14 +78,20 @@ def router(ctx: AppContext) -> APIRouter:
             return {"versions": modrinth.project_versions(project_id, loader)}
 
     @api.get("/api/curseforge/search")
-    def search(q: str) -> dict[str, Any]:
+    def search(q: str, kind: str = "mods") -> dict[str, Any]:
+        """`kind` é a pasta do arquivo — procurar shader entre mods não acha."""
+
         if not q.strip():
             return {"results": []}
 
         try:
             # 3 páginas: buscas comuns ("Better Combat") passam de 100 resultados
             # e o projeto certo pode estar na terceira
-            found = ctx.curseforge().search(query=q.strip(), pages=3)
+            found = ctx.curseforge().search(
+                query=q.strip(),
+                pages=3,
+                class_id=CURSEFORGE_CLASSES.get(kind, CURSEFORGE_CLASS_MODS),
+            )
         except ApiError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
 

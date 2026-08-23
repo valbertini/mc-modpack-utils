@@ -17,7 +17,7 @@ class FakeCurseForge:
         self.projects = projects
         self.files_by_id = files_by_id or {}
 
-    def search(self, query=None, slug=None, pages=None):
+    def search(self, query=None, slug=None, pages=None, class_id=None):
         term = (slug or query or "").lower()
         return [
             p for p in self.projects if term in p["name"].lower() or term in p["slug"]

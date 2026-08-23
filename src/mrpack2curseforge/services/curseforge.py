@@ -4,7 +4,6 @@ Responsável apenas por falar com a API (busca, listagem de arquivos), cache e
 retries. Nenhuma heurística de matching mora aqui.
 """
 
-import time
 from typing import Any
 
 import httpx
@@ -17,8 +16,8 @@ from mrpack2curseforge.constants import (
     CURSEFORGE_PAGE_SIZE,
     USER_AGENT,
 )
-from mrpack2curseforge.exceptions import ApiError
 from mrpack2curseforge.services.cache import SimpleCache
+from mrpack2curseforge.services.http import VAZIO, fetch_json
 
 
 def slim_file(file: dict[str, Any]) -> dict[str, Any]:
@@ -88,28 +87,17 @@ class CurseForgeClient:
 
     # ------------------------------------------------------------ transporte
     def _get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
-        last_error: Exception | None = None
+        """Um GET na API. Id inexistente (`404`) ou inválido (`400`) vira `{}`."""
 
-        for attempt in range(Config.HTTP_RETRIES):
-            try:
-                response = self.client.get(url, params=params)
-
-                if response.status_code == 429:
-                    wait = float(response.headers.get("Retry-After", 2 ** attempt))
-                    time.sleep(min(wait, 30))
-                    continue
-
-                if response.status_code in (404, 400):
-                    return {}
-
-                response.raise_for_status()
-                return response.json()
-
-            except (httpx.HTTPError, ValueError) as exc:
-                last_error = exc
-                time.sleep(min(2 ** attempt, 10))
-
-        raise ApiError(f"CurseForge {url} falhou: {last_error}")
+        data = fetch_json(
+            self.client,
+            "GET",
+            url,
+            params=params,
+            empty_on=(400, 404),
+            label="CurseForge ",
+        )
+        return {} if data is VAZIO else data
 
     # ---------------------------------------------------------------- busca
     def search(
@@ -117,14 +105,20 @@ class CurseForgeClient:
         query: str | None = None,
         slug: str | None = None,
         pages: int | None = None,
+        class_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Busca projetos. `slug` faz lookup exato; `query` faz busca textual."""
+        """Busca projetos. `slug` faz lookup exato; `query` faz busca textual.
+
+        `class_id` escolhe a seção do site (mods, resourcepacks, shaders). Sem
+        ele a API só devolve mods, e um resourcepack nunca seria encontrado.
+        """
 
         if not query and not slug:
             return []
 
         pages = pages if pages is not None else Config.SEARCH_PAGES
-        cache_key = f"{slug or ''}|{query or ''}|{pages}"
+        class_id = class_id or CURSEFORGE_CLASS_MODS
+        cache_key = f"{slug or ''}|{query or ''}|{pages}|{class_id}"
 
         cached = self.cache.get("search", cache_key)
         if cached is not None:
@@ -135,7 +129,7 @@ class CurseForgeClient:
         for page in range(pages):
             params: dict[str, Any] = {
                 "gameId": CURSEFORGE_GAME_ID,
-                "classId": CURSEFORGE_CLASS_MODS,
+                "classId": class_id,
                 "pageSize": CURSEFORGE_PAGE_SIZE,
                 "index": page * CURSEFORGE_PAGE_SIZE,
             }

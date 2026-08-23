@@ -4,6 +4,9 @@ Regra de ouro: **o match só é aceito quando o CurseForge oferece um arquivo co
 exatamente o mesmo nome do `.jar` usado no modpack original.** O nome do projeto
 serve apenas para *encontrar candidatos*; quem confirma é o arquivo.
 
+Vale para mod, resourcepack e shader: o que muda entre eles é só o `classId` da
+busca (a seção do site), tirado da pasta do arquivo no índice.
+
 Ordem das tentativas (para cada mod):
 
     1. slug do Modrinth      -> lookup exato no CurseForge
@@ -20,6 +23,12 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from mrpack2curseforge.config import Config
+from mrpack2curseforge.constants import (
+    CURSEFORGE_CLASS_MODS,
+    CURSEFORGE_CLASSES,
+    CURSEFORGE_SECTIONS,
+    DEFAULT_SECTION,
+)
 from mrpack2curseforge.domain import (
     Diagnosis,
     MatchResult,
@@ -36,6 +45,28 @@ from mrpack2curseforge.services.modrinth import ModrinthClient
 # ---------------------------------------------------------------------------
 
 LOADER_TOKENS = ("neoforge", "forge", "fabric", "quilt", "iris", "mc")
+
+# O CurseForge mistura o loader dentro de `gameVersions` ("Fabric", "NeoForge").
+# Que loaders servem para um pack de cada tipo: o Quilt roda mod de Fabric, o
+# contrário não vale, e os outros três só aceitam a si mesmos.
+LOADER_ACCEPTS = {
+    "fabric": ("fabric",),
+    "quilt": ("quilt", "fabric"),
+    "forge": ("forge",),
+    "neoforge": ("neoforge",),
+}
+
+
+def file_loaders(file: dict[str, Any]) -> set[str]:
+    """Loaders que o arquivo do CurseForge declara. Vazio = não declarou nenhum.
+
+    Arquivo antigo costuma vir sem essa marcação, e resourcepack nunca a tem —
+    por isso "não declarou" é um caso à parte de "declarou outro".
+    """
+
+    tags = {str(tag).lower() for tag in (file.get("gameVersions") or [])}
+    return tags & set(LOADER_ACCEPTS)
+
 
 # Simplificações para famílias de mods cujo nome de arquivo é muito ruidoso.
 SIMPLE_HINTS = (
@@ -68,8 +99,10 @@ def normalize_mod_name(file_name: str) -> str:
 
     name = strip_extension(file_name)
 
-    # separa CamelCase antes de baixar para minúsculas
-    name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    # separa CamelCase antes de baixar para minúsculas. Só depois de letra: a
+    # fronteira dígito→maiúscula parte "3D Default" em "3 D", e os dois pedaços
+    # somem no filtro de tokens logo abaixo
+    name = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)
     name = name.lower()
 
     # versões e canais de release
@@ -215,6 +248,16 @@ def name_variants(base: str | None) -> list[str]:
     return unique[:4]
 
 
+def _first_author(project: dict[str, Any]) -> str | None:
+    """Autor principal do projeto — o `modlist.html` do CurseForge mostra ele."""
+
+    for author in project.get("authors") or []:
+        if author.get("name"):
+            return author["name"]
+
+    return None
+
+
 def rank_projects(
     candidates: list[dict[str, Any]], reference: str
 ) -> list[dict[str, Any]]:
@@ -271,14 +314,25 @@ class CurseForgeMatcher:
 
     # ------------------------------------------------------------ público
     def match(
-        self, mod: PackFile, modrinth: ModrinthProject | None = None
+        self,
+        mod: PackFile,
+        modrinth: ModrinthProject | None = None,
+        diagnose: bool = True,
     ) -> MatchResult:
+        """Procura o arquivo no CurseForge.
+
+        `diagnose=False` desliga a investigação do "por quê" quando ela não teria
+        para quem servir — é o caso dos arquivos que já estavam em `overrides/`:
+        não achar é o estado normal deles, e não vira conflito na tela.
+        """
+
         result = MatchResult(mod=mod, modrinth=modrinth)
 
         target = normalize_file_name(mod.file_name)
         if not target:
             return result
 
+        class_id = CURSEFORGE_CLASSES.get(mod.folder, CURSEFORGE_CLASS_MODS)
         seen_projects: set[int] = set()
         # candidatos vistos em todas as consultas, na ordem de relevância
         pool: dict[int, dict[str, Any]] = {}
@@ -295,6 +349,7 @@ class CurseForgeMatcher:
             candidates = self.client.search(
                 slug=query if use_slug else None,
                 query=None if use_slug else query,
+                class_id=class_id,
             )
 
             ranked = self._rank(candidates, query)
@@ -315,11 +370,13 @@ class CurseForgeMatcher:
                 result.file_id = file["id"]
                 result.project_name = project.get("name")
                 result.project_slug = project.get("slug")
+                result.project_author = _first_author(project)
                 return result
 
         # nada é logado por mod: a busca roda em paralelo e sairia fora de ordem.
         # O resumo organizado é impresso de uma vez em `Converter._log_analysis`.
-        result.diagnosis = self.diagnose(mod, modrinth, list(pool.values()))
+        if diagnose:
+            result.diagnosis = self.diagnose(mod, modrinth, list(pool.values()))
 
         return result
 
@@ -343,6 +400,7 @@ class CurseForgeMatcher:
         best = Diagnosis(
             reason=MissingReason.NOT_ON_CURSEFORGE,
             modrinth_files_checked=len(references),
+            section=CURSEFORGE_SECTIONS.get(mod.folder, DEFAULT_SECTION),
         )
 
         for candidate in candidates[: Config.DIAGNOSIS_CANDIDATES]:
@@ -442,6 +500,12 @@ class CurseForgeMatcher:
             if slug and slug not in slugs:
                 slugs.append(slug)
 
+        # "3D Default" é `3d-default` no Modrinth e `minecraft-3d-default` no
+        # CurseForge, e a busca textual por texture pack nunca devolve o projeto
+        # (150 resultados sem ele). O lookup por slug é 0-ou-1: sai barato tentar
+        if not mod.is_mod:
+            slugs += [f"minecraft-{slug}" for slug in list(slugs)]
+
         for slug in slugs:
             plan.append((MatchStrategy.MODRINTH_SLUG, slug, True))
 
@@ -453,8 +517,9 @@ class CurseForgeMatcher:
             plan.append((MatchStrategy.MODRINTH_VARIANT, variant, False))
 
         # 3. o loader costuma desempatar buscas genéricas ("Things" -> 100
-        #    resultados; "Things fabric" -> um punhado)
-        if self.loader:
+        #    resultados; "Things fabric" -> um punhado). Só vale para mods:
+        #    resourcepack e shader não têm loader, e o termo só atrapalharia
+        if self.loader and mod.is_mod:
             for name in filter(None, [base, normalize_mod_name(mod.file_name)]):
                 plan.append(
                     (MatchStrategy.MODRINTH_LOADER, f"{name} {self.loader}", False)
@@ -482,11 +547,29 @@ class CurseForgeMatcher:
         target: str,
         seen_projects: set[int],
     ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        # achou o arquivo, mas ele é de outro loader: guarda e continua olhando
+        reserva: tuple[dict[str, Any], dict[str, Any]] | None = None
+
+        def considerar(
+            candidate: dict[str, Any], file: dict[str, Any] | None
+        ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+            nonlocal reserva
+
+            if file is None:
+                return None
+            if self._loader_rank(file) < 3:
+                return candidate, file
+
+            reserva = reserva or (candidate, file)
+            return None
+
         # 1. varredura grátis: os `latestFiles` já vieram na resposta da busca
         for candidate in ranked:
-            for file in candidate.get("latestFiles") or []:
-                if self._same_file(file, target):
-                    return candidate, file
+            hit = considerar(
+                candidate, self._pick_file(candidate.get("latestFiles") or [], target)
+            )
+            if hit:
+                return hit
 
         # 2. lista completa de arquivos dos melhores candidatos
         for position, candidate in enumerate(ranked[: Config.MAX_CANDIDATES]):
@@ -496,21 +579,86 @@ class CurseForgeMatcher:
                 continue
             seen_projects.add(mod_id)
 
-            files = self.client.get_files(
-                mod_id, game_version=self.minecraft_version, max_pages=2
+            hit = considerar(
+                candidate,
+                self._pick_file(
+                    self.client.get_files(
+                        mod_id, game_version=self.minecraft_version, max_pages=2
+                    ),
+                    target,
+                ),
             )
-
-            for file in files:
-                if self._same_file(file, target):
-                    return candidate, file
+            if hit:
+                return hit
 
             # só os 3 melhores candidatos justificam varrer todo o histórico
             if position < 3:
-                for file in self.client.get_files(mod_id):
-                    if self._same_file(file, target):
-                        return candidate, file
+                hit = considerar(
+                    candidate, self._pick_file(self.client.get_files(mod_id), target)
+                )
+                if hit:
+                    return hit
 
-        return None
+        return reserva
+
+    def _pick_file(
+        self, files: list[dict[str, Any]], target: str
+    ) -> dict[str, Any] | None:
+        """O melhor arquivo com o nome procurado, dentro de um projeto.
+
+        O nome do arquivo nem sempre identifica uma release. Um resourcepack
+        publica as 40 versões como "Low Shield.zip"; e o Cloth Config publica o
+        jar de Fabric e o de NeoForge **com o mesmo nome**, diferentes só pela
+        marcação de loader. Então, entre os homônimos:
+
+        1. quem serve ao loader do pack (`_loader_rank`);
+        2. quem declara a versão do Minecraft do pack;
+        3. o mais recente.
+        """
+
+        iguais = [f for f in files if self._same_file(f, target)]
+        if not iguais:
+            return None
+
+        # dois `sort` estáveis: o segundo agrupa sem desfazer a ordem do primeiro
+        iguais.sort(key=lambda f: f.get("fileDate") or "", reverse=True)
+        iguais.sort(
+            key=lambda f: (
+                self._loader_rank(f),
+                self.minecraft_version not in (f.get("gameVersions") or []),
+            )
+        )
+
+        return iguais[0]
+
+    def _loader_rank(self, file: dict[str, Any]) -> int:
+        """Quatro degraus, do melhor para o pior:
+
+        0. declara o loader do pack;
+        1. declara outro que o pack aceita (Quilt roda mod de Fabric);
+        2. não declara loader nenhum — arquivo antigo, ou resourcepack;
+        3. declara só loader incompatível.
+
+        O 3 **não** elimina, e essa foi uma lição medida: num pack Forge com
+        Sinytra Connector, 6 mods de Fabric estão lá de propósito e o CurseForge
+        publica exatamente aqueles jars. Recusá-los mandaria para `overrides/`
+        um match certo. O 3 perde para qualquer alternativa e faz a busca
+        continuar procurando (`_find_file_in_candidates`), mas serve de reserva.
+        """
+
+        declarados = file_loaders(file)
+        if not declarados:
+            return 2
+
+        loader = (self.loader or "").lower()
+        aceitos = LOADER_ACCEPTS.get(loader)
+        if not aceitos:
+            return 2
+
+        if loader in declarados:
+            return 0
+
+        return 1 if declarados & set(aceitos) else 3
 
     def _same_file(self, file: dict[str, Any], target: str) -> bool:
         remote = file.get("fileName") or ""

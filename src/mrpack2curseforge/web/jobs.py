@@ -13,7 +13,6 @@ Ciclo de vida de um job (só existe **um** ativo por vez):
     cancelled / error são estados finais; `close()` libera a vaga.
 """
 
-import re
 import shutil
 import threading
 import time
@@ -26,11 +25,9 @@ from mrpack2curseforge.config import Config
 from mrpack2curseforge.converter import ConversionOutcome, Converter, Resolution
 from mrpack2curseforge.domain import MatchStrategy, MissingReason
 from mrpack2curseforge.exceptions import ConversionCancelled
-from mrpack2curseforge.updater import UpdateDecisions, Updater, default_excluded
+from mrpack2curseforge.updater import UpdateDecisions, Updater
+from mrpack2curseforge.web.payloads import log_plain, log_segments, update_payload
 
-# só as tags que o projeto usa: assim um nome de arquivo com colchetes
-# (ex.: "mod[1.20].jar") não é mutilado no log
-MARKUP = re.compile(r"\[/?(?:red|green|yellow|cyan|blue|dim|bold)\]", re.IGNORECASE)
 MAX_LOGS = 2000
 
 ACTIVE_STATUSES = (
@@ -41,159 +38,6 @@ ACTIVE_STATUSES = (
     "finishing",
 )
 BUSY_STATUSES = ("queued", "running", "finishing")
-
-
-LEVEL_BY_TAG = {
-    "red": "error",
-    "yellow": "warn",
-    "green": "ok",
-    "cyan": "cyan",
-    # `dim` é o rótulo secundário ("projeto no CurseForge:"), o texto sem
-    # marcação é o conteúdo em si — precisam ser distinguíveis
-    "dim": "dim",
-}
-
-
-def _segments(message: str) -> list[dict[str, str]]:
-    """Quebra a marcação do `rich` em trechos coloridos.
-
-    É o que permite a linha de resumo ter cada número na sua cor
-    (`45` verde, `4` amarelo, `0` vermelho) em vez de uma cor só para tudo.
-    """
-
-    parts: list[dict[str, str]] = []
-    stack: list[str] = []
-    position = 0
-
-    def level() -> str:
-        for tag in reversed(stack):
-            if tag in LEVEL_BY_TAG:
-                return LEVEL_BY_TAG[tag]
-        return "info"
-
-    for match in MARKUP.finditer(message):
-        chunk = message[position : match.start()]
-        if chunk:
-            parts.append({"text": chunk, "level": level()})
-
-        tag = match.group(0).strip("[]/").lower()
-
-        if match.group(0).startswith("[/"):
-            if tag in stack:
-                stack.remove(tag)
-        else:
-            stack.append(tag)
-
-        position = match.end()
-
-    tail = message[position:]
-    if tail:
-        parts.append({"text": tail, "level": level()})
-
-    # espaços à direita não importam; a indentação à esquerda sim
-    while parts and not parts[-1]["text"].rstrip():
-        parts.pop()
-    if parts:
-        parts[-1]["text"] = parts[-1]["text"].rstrip()
-
-    return parts
-
-
-def _plain(message: str) -> tuple[str, str]:
-    """Texto sem marcação + cor de base da linha.
-
-    Regra: linha que começa com `[bold]` é título/resumo e fica neutra (ela mistura
-    verde, amarelo e vermelho e não é um erro); nas demais vale a primeira cor
-    encontrada, mesmo que venha depois da indentação.
-    """
-
-    parts = _segments(message)
-    text = "".join(part["text"] for part in parts)
-
-    if message.lstrip().lower().startswith("[bold]"):
-        return text, "info"
-
-    level = next((part["level"] for part in parts if part["level"] != "info"), "info")
-
-    return text, level
-
-
-def _file_payload(result, decisions) -> dict[str, Any]:
-    """Um arquivo do pack com o estado da decisão do usuário."""
-
-    caminho = result.mod.file_path
-    escolha = decisions.versions.get(caminho)
-    # o projeto detectado na análise; a escolha manual pode ter trocado
-    original = result.auto_modrinth or result.modrinth
-
-    return {
-        "file_path": caminho,
-        "file_name": result.mod.file_name,
-        "is_mod": result.mod.is_mod,
-        "status": result.status.value,
-        # a interface junta os dois grupos numa lista só; o card precisa saber
-        "has_version": result.has_version,
-        "project_id": original.project_id if original else None,
-        "title": original.title if original else None,
-        "icon": original.icon_url if original else None,
-        "url": original.url if original else None,
-        "from_version": result.from_version,
-        "to_version": result.to_version,
-        "version_type": result.version_type,
-        "new_file_name": result.new_file.file_name if result.new_file else None,
-        # decisões
-        "manual": escolha is not None,
-        "chosen": (
-            {
-                "version_id": escolha.version_id,
-                "version_number": escolha.version_number,
-                "file_name": escolha.file_name,
-                "project_id": escolha.project_id,
-                "project_title": escolha.project_title,
-            }
-            if escolha
-            else None
-        ),
-        "skipped": caminho in decisions.keep,
-        "excluded": _decided_exclusion(result, decisions),
-    }
-
-
-def _decided_exclusion(result, decisions) -> bool:
-    """Decisão do usuário quando existe; senão, o padrão do atualizador."""
-
-    caminho = result.mod.file_path
-
-    if caminho in decisions.exclude:
-        return True
-    if caminho in decisions.include:
-        return False
-
-    return default_excluded(result)
-
-
-def _update_payload(outcome, decisions) -> dict[str, Any]:
-    """Resultado de uma atualização, do jeito que a interface consome."""
-
-    return {
-        "packaged": outcome.packaged,
-        # com versão para o alvo (dá para trocar a versão de qualquer um)
-        "with_version": [
-            _file_payload(result, decisions) for result in outcome.with_version
-        ],
-        # sem versão para o alvo: entram como estão ou ficam de fora
-        "without_version": [
-            _file_payload(result, decisions) for result in outcome.without_version
-        ],
-        "from_minecraft": outcome.pack.minecraft.version,
-        "to_minecraft": outcome.minecraft_version,
-        "loader": f"{outcome.target_loader}-{outcome.loader_version}",
-        "from_loader": outcome.pack.minecraft.loader,
-        "to_loader": outcome.target_loader,
-        "loader_changed": outcome.loader_changed,
-        "downgrade": outcome.downgrade,
-        "summary": outcome.summary,
-    }
 
 
 @dataclass
@@ -232,10 +76,10 @@ class Job:
 
     def add_log(self, message: str) -> None:
         # linhas vazias entram também: são os espaçadores do resumo da análise
-        text, level = _plain(message)
+        text, level = log_plain(message)
         entry: dict[str, Any] = {"text": text, "level": level}
 
-        parts = _segments(message)
+        parts = log_segments(message)
         if len({part["level"] for part in parts}) > 1:
             # linha com mais de uma cor (o resumo): o front pinta trecho a trecho
             entry["parts"] = parts
@@ -274,7 +118,7 @@ class Job:
         outcome = self.outcome
 
         if outcome is not None and self.kind == "update":
-            data["update"] = _update_payload(outcome, self.decisions)
+            data["update"] = update_payload(outcome, self.decisions)
             data["dirty"] = self.dirty
 
             if outcome.output.exists():
@@ -355,6 +199,9 @@ class Job:
             items.append(
                 {
                     "file_name": result.mod.file_name,
+                    # a pasta do arquivo: é ela que diz em que seção do
+                    # CurseForge a busca do card tem de procurar
+                    "kind": result.mod.folder,
                     "reason": reason,
                     "similarity": round(diagnosis.similarity, 3) if diagnosis else None,
                     # o mod original, para comparar com os candidatos do CurseForge
@@ -570,7 +417,7 @@ class JobManager:
         job.status = "awaiting_conflicts"
         job.set_stage(f"{len(conflicts)} conflito(s) aguardando decisão")
         job.add_log(
-            f"[yellow]--[/yellow] {len(conflicts)} mod(s) não entraram no "
+            f"[yellow]--[/yellow] {len(conflicts)} arquivo(s) não entraram no "
             f"manifest. Resolva os conflitos (ou siga assim) e aplique as "
             f"mudanças para continuar."
         )

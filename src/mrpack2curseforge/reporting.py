@@ -111,7 +111,7 @@ def render_summary(console: Console, report: ConversionReport) -> None:
     table.add_column("Valor", justify="right", style="bold")
 
     table.add_row("Minecraft", f"{report.minecraft_version} ({report.loader})")
-    table.add_row("Mods no pack", str(report.total_mods))
+    table.add_row("Arquivos procurados lá", str(report.total_mods))
     table.add_row("Encontrados no CurseForge", f"[green]{report.matched}[/green]")
     table.add_row("Enviados para overrides", f"[yellow]{report.overrides}[/yellow]")
     table.add_row(

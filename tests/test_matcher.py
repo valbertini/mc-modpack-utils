@@ -15,10 +15,12 @@ class FakeCurseForge:
         self.search_calls = []
         self.file_calls = []
 
-    def search(self, query=None, slug=None, pages=None):
+    def search(self, query=None, slug=None, pages=None, class_id=None):
         """Imita a API: `slug` é lookup exato, `query` é busca textual."""
 
-        self.search_calls.append(("slug" if slug else "query", slug or query))
+        self.search_calls.append(
+            ("slug" if slug else "query", slug or query, class_id)
+        )
 
         if slug:
             return [p for p in self.projects if p["slug"].lower() == slug.lower()]
@@ -256,7 +258,7 @@ def test_the_pack_loader_is_added_as_a_last_name_query():
         ModrinthProject(project_id="x", slug="things", title="Things"),
     )
 
-    consultas = [termo for tipo, termo in client.search_calls if tipo == "query"]
+    consultas = [t for tipo, t, _ in client.search_calls if tipo == "query"]
 
     assert "Things fabric" in consultas
     # o nome puro é tentado antes da versão com loader

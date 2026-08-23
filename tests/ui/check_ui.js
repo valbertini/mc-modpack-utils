@@ -1,4 +1,4 @@
-/* Conferência da interface sem navegador: `node tools/check_ui.js`
+/* Conferência da interface sem navegador: `node tests/ui/check_ui.js`
  *
  * O `app.js` roda num DOM de mentira e os renderizadores são chamados para cada
  * estado possível de um job. Não substitui abrir a página — pega o que já deu
@@ -8,104 +8,7 @@
 
 "use strict";
 
-const fs = require("fs");
-const vm = require("vm");
-const path = require("path");
-
-const STATIC = path.join(__dirname, "..", "src", "mrpack2curseforge", "web", "static");
-const html = fs.readFileSync(path.join(STATIC, "index.html"), "utf8");
-const js = fs.readFileSync(path.join(STATIC, "app.js"), "utf8");
-
-/* ----------------------------------------------------------------- DOM falso */
-const avisos = [];
-
-class El {
-  constructor(id) {
-    this.id = id || "";
-    this._html = "";
-    this._text = "";
-    this.className = "";
-    this.dataset = {};
-    this.style = {};
-    this.disabled = false;
-    this.value = "";
-    this.placeholder = "";
-    this.title = "";
-    this.hidden = false;
-
-    const self = this;
-
-    // `classList` de verdade: opera sobre o `className`, senão o teste não
-    // enxerga nada além de `hidden` (foi o que deixou passar as travas)
-    const classes = () =>
-      new Set(String(self.className || "").split(/\s+/).filter(Boolean));
-
-    const gravar = (conjunto) => {
-      self.className = [...conjunto].join(" ");
-      self.hidden = conjunto.has("hidden");
-    };
-
-    const mexer = (classe, ligado) => {
-      const atual = classes();
-      if (ligado) atual.add(classe);
-      else atual.delete(classe);
-      gravar(atual);
-    };
-
-    this.classList = {
-      add: (c) => mexer(c, true),
-      remove: (c) => mexer(c, false),
-      toggle: (c, on) => mexer(c, on === undefined ? !classes().has(c) : !!on),
-      contains: (c) => classes().has(c),
-    };
-  }
-
-  // no DOM real um sobrescreve o outro
-  get innerHTML() {
-    return this._html;
-  }
-  set innerHTML(v) {
-    const texto = String(v);
-    if (/\[object Object\]/.test(texto)) {
-      avisos.push(`objeto interpolado no HTML de #${this.id}`);
-    }
-    if (/(^|[>\s])undefined([<\s.,)]|$)/.test(texto)) {
-      avisos.push(`"undefined" no HTML de #${this.id}`);
-    }
-    this._html = texto;
-    this._text = texto.replace(/<[^>]+>/g, "");
-  }
-  get textContent() {
-    return this._text;
-  }
-  set textContent(v) {
-    this._text = String(v == null ? "" : v);
-    this._html = "";
-  }
-
-  // devolve um elemento de mentira em vez de `null`: assim o código que
-  // consulta e liga eventos depois de renderizar é realmente exercitado
-  querySelector() {
-    return new El();
-  }
-  querySelectorAll() {
-    return [];
-  }
-  addEventListener() {}
-  setAttribute(nome, valor) {
-    this[nome] = valor;
-  }
-  getAttribute(nome) {
-    return this[nome];
-  }
-  focus() {}
-  appendChild() {}
-  remove() {}
-  scrollIntoView() {}
-  closest() {
-    return null;
-  }
-}
+const { montar } = require("./fake_dom");
 
 const SETTINGS_FALSO = {
   path: "C:/projeto/.env",
@@ -154,62 +57,52 @@ const SETTINGS_FALSO = {
   ],
 };
 
-const elementos = new Map(
-  [...html.matchAll(/id="([^"]+)"/g)].map((m) => [m[1], new El(m[1])])
-);
-
-const sandbox = {
-  document: {
-    getElementById: (id) => {
-      if (!elementos.has(id)) elementos.set(id, new El(id));
-      return elementos.get(id);
+// a lista de packs atualizados vem da API: sem ela o ✕ dali não é exercitado
+const UPDATES_FALSO = {
+  updates: [
+    {
+      name: "pack-[atualizado].mrpack",
+      pack: { name: "Pack" },
+      from_minecraft: "1.21",
+      to_minecraft: "1.21.4",
+      from_loader: "fabric",
+      loader: "fabric-0.19",
+      summary: { total: 10, updated: 8, manual: 1, excluded: 1 },
+      available: true,
+      size_mb: 6.8,
+      modified: 1,
     },
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    createElement: () => new El(),
-    addEventListener: () => {},
-    body: new El("body"),
-  },
-  window: { addEventListener: () => {} },
-  console,
-  setTimeout: () => 0,
-  clearTimeout: () => {},
-  setInterval: () => 0,
-  clearInterval: () => {},
-  // responde por rota: sem isto os renderizadores que buscam dados quebram
-  fetch: async (url) => ({
-    ok: true,
-    status: 200,
-    json: async () => (String(url).includes("/api/settings") ? SETTINGS_FALSO : {}),
-  }),
-  CSS: { escape: (s) => s },
-  FormData: class {},
-  XMLHttpRequest: class {
-    open() {}
-    send() {}
-    setRequestHeader() {}
-    addEventListener() {}
-    get upload() {
-      return { addEventListener: () => {} };
-    }
-  },
+  ],
 };
-sandbox.globalThis = sandbox;
 
-vm.createContext(sandbox);
-vm.runInContext(js, sandbox, { filename: "app.js" });
+// toda chamada à API fica registrada: é assim que se afirma que um clique
+// *fez* alguma coisa, e não só que o botão está desenhado na tela
+const chamadas = [];
+
+const { html, js, avisos, elementos, metaVersao, pegar } = montar({
+  respostas: (url) => {
+    chamadas.push(String(url));
+    if (url.includes("/api/settings")) return SETTINGS_FALSO;
+    if (url.includes("/api/updates")) return UPDATES_FALSO;
+    return {};
+  },
+});
 
 // `const state` e as `function` ficam no escopo lexical do contexto
-const pegar = (expr) => vm.runInContext(expr, sandbox);
 const app = {
   state: pegar("state"),
   renderJob: pegar("renderJob"),
+  renderConfirm: pegar("renderConfirm"),
+  conferirVersao: pegar("conferirVersao"),
   renderConflicts: pegar("renderConflicts"),
   renderUpdateJob: pegar("renderUpdateJob"),
   renderUpdateReview: pegar("renderUpdateReview"),
   renderPacks: pegar("renderPacks"),
   renderUpdatePacks: pegar("renderUpdatePacks"),
   renderRecords: pegar("renderRecords"),
+  loadSavedUpdates: pegar("loadSavedUpdates"),
+  apagarPack: pegar("apagarPack"),
+  apagarRegistro: pegar("apagarRegistro"),
   selectPack: pegar("selectPack"),
   packEmCurso: pegar("packEmCurso"),
   abrirSettings: pegar("abrirSettings"),
@@ -290,7 +183,8 @@ const jobConversao = (status, over = {}) => ({
     minecraft_version: "1.21",
     loader: "fabric-0.16",
   },
-  plan: { manifest: 8, manual: 0, downloads: 2, extra_files: 0, override_files: 3 },
+  plan: { manifest: 8, manual: 0, from_overrides: 1, downloads: 2,
+    download_mods: 2, zip_mb: 380.7 },
   output: status === "done" ? { name: "p.zip", size_mb: 12.3 } : null,
   ...over,
 });
@@ -344,8 +238,12 @@ const jobAtualizacao = (status, over = {}) => ({
 });
 
 const conflitos = () => [
-  { file_name: "x.jar", reason: "version-unavailable", resolution: null, modrinth: {} },
-  { file_name: "y.jar", reason: "not-on-curseforge", resolution: null, modrinth: {} },
+  { file_name: "x.jar", kind: "mods", reason: "version-unavailable",
+    resolution: null, modrinth: {} },
+  { file_name: "y.jar", kind: "mods", reason: "not-on-curseforge",
+    resolution: null, modrinth: {} },
+  { file_name: "z.zip", kind: "shaderpacks", reason: "not-on-curseforge",
+    resolution: null, modrinth: {} },
 ];
 
 function renderConversao(status, preparar) {
@@ -678,6 +576,20 @@ conferir(
   !elementos.get("conflict-groups").className.includes("locked")
 );
 
+console.log("\n--- tipo do arquivo no conflito ---");
+
+{
+  const html = elementos.get("conflict-groups").innerHTML;
+  conferir(
+    "shader ganha etiqueta do tipo",
+    /<span class="tag">shader<\/span>/.test(html)
+  );
+  conferir(
+    "mod não ganha etiqueta nenhuma (é o caso normal)",
+    !/<span class="tag">mod/.test(html)
+  );
+}
+
 renderAtualizacao("finishing");
 conferir(
   "a revisão da atualização também trava",
@@ -688,6 +600,124 @@ conferir(
   "travar não escreve aviso nenhum na tela",
   !/Espere terminar/.test(elementos.get("ur-groups").innerHTML)
 );
+
+console.log("\n--- card de confirmação do conversor ---");
+
+{
+  renderConversao("awaiting_conflicts");
+  app.state.confirming = true;
+  app.renderConfirm(app.state.job);
+
+  const box = elementos.get("apply-confirm");
+  const texto = box.textContent.replace(/\s+/g, " ");
+
+  conferir("confirmação: o card aparece", !box.hidden, box.className);
+  conferir("confirmação: diz quanto vai para o manifest", /8 no manifest/.test(texto),
+    texto);
+  conferir("confirmação: diz quanto baixa",
+    /2 baixados/.test(texto), texto);
+  conferir("confirmação: diz o que sai do overrides do mrpack",
+    /1 sai do/.test(texto), texto);
+  conferir("confirmação: fecha com o tamanho do .zip",
+    /\.zip final ≈ 381 MB/.test(texto), texto);
+  conferir("confirmação: e ele é o único tamanho ali",
+    (texto.match(/MB|GB/g) || []).length === 1, texto);
+  conferir("confirmação: o tamanho vem destacado",
+    /<strong class="tamanho">/.test(box.innerHTML), box.innerHTML);
+  conferir("confirmação: tem os dois botões",
+    /data-confirm="go"/.test(box.innerHTML) && /data-confirm="back"/.test(box.innerHTML));
+
+  // era este o buraco: sem plano nenhum campo pode virar NaN na tela
+  conferir("confirmação: nada de NaN", !/NaN/.test(box.innerHTML), box.innerHTML);
+
+  app.state.confirming = false;
+  app.renderConfirm(app.state.job);
+  conferir("confirmação: fecha quando você volta", elementos.get("apply-confirm").hidden);
+}
+
+console.log("\n--- aviso de página desatualizada ---");
+
+{
+  app.conferirVersao("9.9.9");
+  conferir("mesma versão: nenhum aviso", elementos.get("stale-app").hidden);
+  conferir("e a versão da página fica à vista",
+    elementos.get("app-version").textContent === "v9.9.9",
+    elementos.get("app-version").textContent);
+
+  app.conferirVersao("9.9.10");
+  const box = elementos.get("stale-app");
+  conferir("versão diferente: o aviso aparece", !box.hidden, box.className);
+  conferir("e diz as duas versões",
+    elementos.get("stale-page").textContent === "9.9.9" &&
+      elementos.get("stale-server").textContent === "9.9.10");
+
+  app.conferirVersao(null);
+  conferir("servidor sem versão não acusa nada", elementos.get("stale-app").hidden);
+
+  app.conferirVersao("9.9.9");
+}
+
+console.log("\n--- apagar um pack da entrada ---");
+
+{
+  app.state.job = null;
+  app.state.packs = [
+    { name: "a.mrpack", size_mb: 1, modified: 1, minecraft: "1.21",
+      loader: "fabric", loader_version: "0.19", mods: 3 },
+  ];
+  app.renderPacks(app.state.packs);
+  const lista = elementos.get("pack-list").innerHTML;
+  conferir("cada pack da entrada tem o ✕ de apagar",
+    /data-del="a\.mrpack"/.test(lista), lista);
+  conferir("e ele apaga no primeiro clique, sem armar",
+    !/armado/.test(lista) && !/de novo/.test(lista), lista);
+
+
+  app.renderUpdatePacks(app.state.packs);
+  conferir("a lista do atualizador também tem",
+    /data-del="a\.mrpack"/.test(elementos.get("update-pack-list").innerHTML));
+
+  // por último: apagar recarrega o estado e redesenha as listas por cima
+  chamadas.length = 0;
+  await app.apagarPack("a.mrpack");
+  conferir("um clique já dispara o DELETE do pack",
+    chamadas.some((u) => u.includes("/api/packs/a.mrpack")), chamadas.join(" "));
+
+  chamadas.length = 0;
+  await app.apagarRegistro("pack");
+  conferir("e o do registro também",
+    chamadas.some((u) => u.includes("/api/records/pack")), chamadas.join(" "));
+}
+
+conferir("nenhum botão apaga a pasta inteira",
+  !/data-clear/.test(html) && !/api\/storage/.test(js), "sobrou faxina de pasta");
+
+console.log("\n--- apagar um item da saída ---");
+
+{
+  app.renderRecords([
+    {
+      id: "pack",
+      pack: { name: "Pack", version: "1", minecraft: "1.21", loader: "fabric-0.19" },
+      summary: { total_mods: 10, matched: 8 },
+      size_mb: 12.3,
+      updated_at: 1,
+      source_available: true,
+    },
+  ]);
+
+  const registros = elementos.get("record-list").innerHTML;
+  conferir("cada conversão salva tem o ✕ de apagar",
+    /data-del="pack"/.test(registros), registros);
+  conferir("e o título diz que o .zip vai junto",
+    /apagar o registro e o \.zip/.test(registros));
+
+  await app.loadSavedUpdates();
+  const atualizados = elementos.get("update-output-list").innerHTML;
+  conferir("cada pack atualizado também tem",
+    /data-del="pack-\[atualizado\]\.mrpack"/.test(atualizados), atualizados);
+}
+
 
 console.log("\n--- pack em processamento ---");
 
@@ -1050,8 +1080,11 @@ conferir(
 
 console.log();
 if (avisos.length) {
+  // eram só impressos, e a linha final dizia "consistente" mesmo assim: foi
+  // por aí que um `NaN` chegou à tela do usuário
   console.log("avisos de renderização:");
   [...new Set(avisos)].forEach((a) => console.log("  -", a));
+  falhas += new Set(avisos).size;
 }
 
 if (falhas) {

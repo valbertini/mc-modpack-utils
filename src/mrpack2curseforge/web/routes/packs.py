@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 
+from mrpack2curseforge import __version__
 from mrpack2curseforge.builders.package import safe_name
 from mrpack2curseforge.config import Config
 from mrpack2curseforge.parsers.mrpack import MrpackParser
@@ -51,6 +52,8 @@ def router(ctx: AppContext) -> APIRouter:
             }
 
         return {
+            # a página compara com a `<meta>` dela: se ficou para trás, avisa
+            "version": __version__,
             "input_dir": str(ctx.input_dir),
             "output_dir": str(ctx.output_dir),
             "api_key_configured": bool(Config.CURSEFORGE_API_KEY),
@@ -91,6 +94,31 @@ def router(ctx: AppContext) -> APIRouter:
             "name": destination.name,
             "size_mb": round(destination.stat().st_size / (1024 * 1024), 1),
         }
+
+    @api.delete("/api/packs/{name}")
+    def delete_pack(name: str) -> dict[str, Any]:
+        """Apaga um `.mrpack` da entrada.
+
+        O pack de um trabalho aberto fica: a conversão ainda vai lê-lo para
+        montar o `overrides/`.
+        """
+
+        path = ctx.input_pack(name)
+
+        for job in (ctx.jobs.current("conversion"), ctx.jobs.current("update")):
+            if job is not None and job.source.name == path.name:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"{path.name} está em um trabalho aberto. "
+                        "Feche-o antes de apagar o arquivo."
+                    ),
+                )
+
+        tamanho = path.stat().st_size
+        path.unlink()
+
+        return {"deleted": True, "freed_mb": round(tamanho / (1024 * 1024), 1)}
 
     @api.get("/api/packs/{name}/inspect")
     def inspect_pack(name: str) -> dict[str, Any]:

@@ -14,6 +14,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from mrpack2curseforge import __version__
 from mrpack2curseforge.config import Config
 from mrpack2curseforge.exceptions import Mrpack2CurseForgeError
 from mrpack2curseforge.parsers.mrpack import MrpackParser
@@ -248,14 +249,22 @@ def web(
 
     url = f"http://{host}:{port}"
 
-    console.print(f"[bold green]Interface web em[/bold green] {url}")
+    console.print(
+        f"[bold green]Interface web em[/bold green] {url}  "
+        f"[dim]v{__version__}[/dim]"
+    )
     console.print("[dim]Tudo roda localmente. Ctrl+C para encerrar.[/dim]")
 
     if open_browser:
         import threading
         import webbrowser
 
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+        # a versão vai na URL de propósito. `webbrowser.open` com a URL de
+        # sempre **foca a aba que já está aberta** em vez de recarregá-la, e aí
+        # reiniciar o app devolvia a interface da versão anterior, ainda viva
+        # na memória daquela aba. URL diferente = navegação de verdade.
+        abrir = f"{url}/?v={__version__}"
+        threading.Timer(1.0, lambda: webbrowser.open(abrir)).start()
 
     serve(
         host=host,
